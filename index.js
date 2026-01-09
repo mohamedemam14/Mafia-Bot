@@ -23,14 +23,14 @@ const DATA_FILE = path.join(DATA_DIR, "progress.json");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
-/* ================== الإعدادات المحدثة ================== */
+/* ================== الإعدادات (تأكد من وضع الأيدي الصحيحة) ================== */
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
-const NOTIFICATION_ROOM_ID = "1459162779419414627"; // روم منشن المتدرب الجاهز
+const NOTIFICATION_ROOM_ID = "1459162819072102574"; // روم منشن المتدرب الجاهز
 
-const READY_RANK_2_ROOM_ID = "1459162819072102574"; 
-const READY_RANK_3_ROOM_ID = "1459162843327758525"; 
-const READY_COMBINED_ROOM_ID = "1459162779419414627"; 
+const READY_RANK_2_ROOM_ID = "1459162819072102574";
+const READY_RANK_3_ROOM_ID = "1459162843327758525";
+const READY_COMBINED_ROOM_ID = "1459162779419414627";
 
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
@@ -50,7 +50,8 @@ const TASKS_RANK_3 = {
   "1459162832699392080": "CPR"
 };
 
-/* ================== دوال النظام والتواريخ ================== */
+/* ================== دوال المساعدة والذكاء الاصطناعي للمواعيد ================== */
+
 function loadProgress() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
   catch (err) { return {}; }
@@ -59,41 +60,66 @@ function saveProgress(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-// دالة ذكية لحساب أقرب يوم ترقية متاح
+// دالة لتحديد اليوم القادم للترقية
 function getNextUpgradeDay() {
-  const daysAr = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"];
-  const upgradeDays = [6, 2, 4]; // السبت، الثلاثاء، الخميس
+  const daysMap = {
+    0: "الأحد", 1: "الاثنين", 2: "الثلاثاء", 
+    3: "الأربعاء", 4: "الخميس", 5: "الجمعة", 6: "السبت"
+  };
+  const upgradeDays = [6, 2, 4]; // السبت(6)، الثلاثاء(2)، الخميس(4)
   const now = new Date();
   const today = now.getDay();
 
-  let next = upgradeDays.find(d => d > today);
-  if (next === undefined) next = upgradeDays[0]; 
+  // البحث عن أقرب يوم من قائمة أيام الترقية
+  let nextDay = upgradeDays.find(d => d >= today);
+  if (nextDay === undefined) nextDay = upgradeDays[0]; // إذا انتهى الأسبوع، اختر أول يوم متاح الأسبوع القادم
 
-  return daysAr[next];
+  return daysMap[nextDay];
 }
 
-/* ================== تنسيق الرسائل الفاخرة ================== */
+/* ================== نماذج الرسائل الاحترافية ================== */
 
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
-  const bar = "🔹".repeat(Math.round(percent/10)) + "🔸".repeat(10 - Math.round(percent/10));
+  const progressBar = "🔹".repeat(Math.round(percent/10)) + "🔸".repeat(10 - Math.round(percent/10));
   const list = totalTasks.map(t => doneTasks.includes(t) ? `┃ ✅ **${t}**` : `┃ 🔘 *${t}*`).join("\n");
 
-  return `### 📑 مـلف تـدريب المـوظفين\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة المستهدفة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم العام:**\n┃ ${bar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`) من المتطلبات.`;
+  return `### 📑 مـلف تـدريب المـوظفين\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة المستهدفة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم:**\n┃ ${progressBar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`) من المتطلبات.`;
 }
 
-function buildPersonalInvite(userId) {
-  return `### 🔔 إشعار جاهزية الترقية\n━━━━━━━━━━━━━━━━━━━━\nمرحباً بك <@${userId}>،\n\nلقد أتممت كافة المهام المطلوبة بنجاح. أنت الآن مدرج في قوائم الترقية.\n\n🗓️ **مواعيد الترقيات:** (السبت - الثلاثاء - الخميس)\n⏳ **أقرب موعد لك:** يوم **( ${getNextUpgradeDay()} )**\n⏰ **الوقت:** من الساعة 10:00 م حتى 12:00 ص\n📍 *بتوقيت مكة المكرمة*\n━━━━━━━━━━━━━━━━━━━━`;
+function buildPersonalNotification(userId) {
+  const day = getNextUpgradeDay();
+  return `
+### 🔔 إشعار إتمام مرحلة التدريب
+━━━━━━━━━━━━━━━━━━━━
+مرحباً بك <@${userId}>،
+
+لقد أتممت جميع المهام المطلوبة بنجاح وأصبحت الآن **جاهزاً للترقية**.
+المواعيد الرسمية للترقيات هي:
+🗓️ **السبت - الثلاثاء - الخميس**
+
+⚠️ أقرب موعد لك هو يوم **( ${day} )**
+⏰ من الساعة **10:00 مساءً** إلى **12:00 منتصف الليل**
+📍 بتوقيت مكة المكرمة.
+
+*نرجو منك التواجد في الموعد المحدد.*
+━━━━━━━━━━━━━━━━━━━━
+`;
 }
 
-/* ================== البوت والأحداث ================== */
+function buildReadyToUpgradeMessage(userId, rank) {
+  return `🎊 **تـهـنـئـة إتـمـام مـهـام** 🎊\n━━━━━━━━━━━━━━━━━━━━\n👤 **المتدرب:** <@${userId}>\n🏅 **الرتبة المنجزة:** \`Rank ${rank}\`\n✅ **الحالة:** جاهز للترقية رسمياً\n\n🔗 https://cdn.discordapp.com/attachments/1449506416065908816/1454546137439801354/1571650a7c706000-1.gif\n━━━━━━━━━━━━━━━━━━━━`;
+}
+
+/* ================== الأحداث والمنطق ================== */
+
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessageReactions],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
+  partials: [Partials.Message, Partials.Channel]
 });
 
 const app = express();
-app.get("/", (req, res) => res.send("Bot is Ready"));
+app.get("/", (req, res) => res.send("Active"));
 app.listen(process.env.PORT || 3000);
 
 client.on(Events.MessageCreate, async (message) => {
@@ -103,8 +129,8 @@ client.on(Events.MessageCreate, async (message) => {
 
   const progress = loadProgress();
   if (progress[message.author.id] && progress[message.author.id].completedRooms.includes(message.channelId)) {
-    const warn = await message.reply(`⛔ <@${message.author.id}>، هذه المهمة مكتملة مسبقاً في ملفك.`);
-    setTimeout(() => { message.delete().catch(() => {}); warn.delete().catch(() => {}); }, 4000);
+    const warning = await message.reply(`⛔ لقد أنهيت هذه المهمة مسبقاً.`);
+    setTimeout(() => { message.delete().catch(() => {}); warning.delete().catch(() => {}); }, 3000);
     return;
   }
 
@@ -114,7 +140,7 @@ client.on(Events.MessageCreate, async (message) => {
     new ButtonBuilder().setCustomId('reject_task').setLabel('رفض ❌').setStyle(ButtonStyle.Danger)
   );
 
-  await message.reply({ content: `⚙️ **لوحة التحكم لملف <@${message.author.id}>:**`, components: [row] });
+  await message.reply({ content: `⚙️ **إدارة المهمة لـ <@${message.author.id}>:**`, components: [row] });
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -134,46 +160,39 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (!progress[traineeId]) progress[traineeId] = { rank, tasks: [], completedRooms: [], followMessageId: null, upgradeNotified: false };
     
     const data = progress[traineeId];
-    if (data.completedRooms.includes(roomId)) return interaction.reply({ content: "مسجلة مسبقاً.", ephemeral: true });
+    if (data.completedRooms.includes(roomId)) return;
 
     data.completedRooms.push(roomId);
     data.tasks.push(TASKS_RANK_2[roomId] || TASKS_RANK_3[roomId]);
 
     const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
     const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID);
-    const content = buildFollowMessage(traineeId, rank, data.tasks, allTasks);
+    await (data.followMessageId ? (await followChannel.messages.fetch(data.followMessageId)).edit({ content: buildFollowMessage(traineeId, rank, data.tasks, allTasks) }) : followChannel.send({ content: buildFollowMessage(traineeId, rank, data.tasks, allTasks) }).then(m => data.followMessageId = m.id));
 
-    if (data.followMessageId) {
-      const msg = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
-      if (msg) await msg.edit({ content });
-    } else {
-      const msg = await followChannel.send({ content });
-      data.followMessageId = msg.id;
-    }
-
-    // --- فحص إتمام التدريب بالكامل ---
+    // إرسال تنبيهات الترقية عند الاكتمال
     if (data.tasks.length === allTasks.length && !data.upgradeNotified) {
       data.upgradeNotified = true;
-
+      
       // 1. روم الرتبة الخاص
       const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
-      if (rRoom) await rRoom.send(`🎉 **جاهز للترقية**\n👤 المتدرب: <@${traineeId}>\n🏅 الرتبة: ${rank}\n\n🔗 https://cdn.discordapp.com/attachments/1449506416065908816/1454546137439801354/1571650a7c706000-1.gif`);
+      if (rRoom) await rRoom.send(buildReadyToUpgradeMessage(traineeId, rank));
 
-      // 2. روم المنشن الشخصي والموعد
+      // 2. روم المنشن الشخصي والموعد (الجديد)
       const nRoom = await client.channels.fetch(NOTIFICATION_ROOM_ID).catch(() => null);
-      if (nRoom) await nRoom.send(buildPersonalInvite(traineeId));
+      if (nRoom) await nRoom.send(buildPersonalNotification(traineeId));
 
       // 3. الروم المشترك
       const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
-      if (cRoom) await cRoom.send(`**\n- إسم المتدرب : <@${traineeId}>\n- الرتبة الحالية : ${rank}\n\n- جاهز للترقية : ✅\n**`);
+      if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **الاسم:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`${rank}\`\n> ✨ **جاهز للترقية :** ✅`);
     }
 
     saveProgress(progress);
     await originalMessage.reactions.removeAll().catch(() => {});
     await originalMessage.react("✅");
-    await interaction.update({ content: "⭐ تم الاعتماد وحذف اللوحة.", components: [] });
+    await interaction.update({ content: "⭐ تم الاعتماد.", components: [] });
     setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
   } else {
+    // منطق الرفض والنقص
     const emoji = interaction.customId === 'missing_photo' ? "📷" : "❌";
     await originalMessage.reactions.removeAll().catch(() => {});
     await originalMessage.react(emoji);
