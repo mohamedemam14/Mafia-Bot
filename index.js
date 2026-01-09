@@ -16,22 +16,18 @@ const client = new Client({
 });
 
 /* ================== CONFIGURATION ================== */
-// ضع الآيدي الخاص بالسيرفرات هنا أو في ملف .env
 const SOURCE_ID = "855491833442336809"; 
 const TARGET_ID = "1415016842476388507";
 const COMMAND_PREFIX = "!نسخ_الهيكل";
 
 /* ================== LOGIC ================== */
 client.once(Events.ClientReady, () => {
-  console.log(`✅ البوت متصل باسم: ${client.user.tag}`);
-  console.log(`📌 السيرفر المصدر: ${SOURCE_ID}`);
-  console.log(`📌 السيرفر الهدف: ${TARGET_ID}`);
+  console.log(`✅ البوت متصل وجاهز باسم: ${client.user.tag}`);
 });
 
 client.on(Events.MessageCreate, async (msg) => {
   if (msg.content !== COMMAND_PREFIX || msg.author.bot) return;
 
-  // التحقق من صلاحيات الشخص الذي أرسل الأمر
   if (!msg.member.permissions.has(PermissionFlagsBits.Administrator)) {
     return msg.reply("❌ هذا الأمر للمسؤولين فقط.");
   }
@@ -40,17 +36,35 @@ client.on(Events.MessageCreate, async (msg) => {
   const targetGuild = client.guilds.cache.get(TARGET_ID);
 
   if (!sourceGuild || !targetGuild) {
-    return msg.reply("❌ تأكد من وجود البوت في السيرفرين ومن صحة الأرقام التعريفية (IDs).");
+    return msg.reply("❌ تأكد من وجود البوت في السيرفرين وصحة الـ IDs.");
   }
 
-  await msg.reply("⏳ بدأت عملية النسخ الآمنة... لن يتم لمس السيرفر الأساسي.");
-
   try {
-    // 1. إنشاء خريطة للرتب لربط القديم بالجديد
+    await msg.reply("⚠️ جاري تنظيف السيرفر الهدف بالكامل ثم البدء بالنسخ... يرجى الانتظار.");
+
+    // --- المرحلة 1: تنظيف السيرفر الهدف (حذف القنوات والرتب) ---
+    console.log("🧹 جاري مسح محتويات السيرفر الهدف...");
+    
+    // حذف القنوات الحالية
+    const targetChannels = await targetGuild.channels.fetch();
+    for (const [id, channel] of targetChannels) {
+      await channel.delete().catch(() => {});
+    }
+
+    // حذف الرتب الحالية (باستثناء الرتب المحمية)
+    const targetRoles = await targetGuild.roles.fetch();
+    for (const [id, role] of targetRoles) {
+      if (role.managed || role.name === "@everyone") continue;
+      // لا يحذف رتبة البوت نفسه
+      if (role.id === targetGuild.members.me.roles.highest.id) continue;
+      await role.delete().catch(() => {});
+    }
+
+    // --- المرحلة 2: نسخ الرتب من المصدر ---
     const roleMap = new Map();
     const sourceRoles = await sourceGuild.roles.fetch();
 
-    console.log("🎨 جاري نسخ الرتب...");
+    console.log("🎨 جاري إنشاء الرتب...");
     for (const [id, role] of sourceRoles) {
       if (role.managed || role.name === "@everyone") continue;
 
@@ -60,16 +74,15 @@ client.on(Events.MessageCreate, async (msg) => {
         hoist: role.hoist,
         permissions: role.permissions,
         mentionable: role.mentionable,
-        reason: "نسخ هيكل السيرفر"
+        reason: "إعادة بناء السيرفر"
       });
       roleMap.set(role.name, newRole.id);
     }
 
-    // 2. جلب كافة قنوات السيرفر المصدر
+    // --- المرحلة 3: نسخ القنوات والفئات ---
     const sourceChannels = await sourceGuild.channels.fetch();
     
-    // 3. نسخ الفئات (Categories) أولاً
-    console.log("📁 جاري نسخ الفئات والقنوات...");
+    console.log("📁 جاري بناء القنوات...");
     const categories = sourceChannels
       .filter(c => c.type === ChannelType.GuildCategory)
       .sort((a, b) => a.position - b.position);
@@ -80,18 +93,25 @@ client.on(Events.MessageCreate, async (msg) => {
         type: ChannelType.GuildCategory
       });
 
-      // جلب القنوات التابعة لهذه الفئة
       const children = sourceChannels
         .filter(c => c.parentId === category.id)
         .sort((a, b) => a.position - b.position);
 
       for (const [childId, child] of children) {
-        // تجهيز صلاحيات القناة بناءً على الأسماء (لضمان عمل الرومات الخاصة)
+        // تجهيز صلاحيات الرومات بناءً على الرتب الجديدة
         const newOverwrites = child.permissionOverwrites.cache.map(overwrite => {
           const sourceRole = sourceGuild.roles.cache.get(overwrite.id);
           if (sourceRole && roleMap.has(sourceRole.name)) {
             return {
               id: roleMap.get(sourceRole.name),
+              allow: overwrite.allow,
+              deny: overwrite.deny
+            };
+          }
+          // الحفاظ على صلاحية @everyone إذا وجدت
+          if (overwrite.id === sourceGuild.id) {
+            return {
+              id: targetGuild.id,
               allow: overwrite.allow,
               deny: overwrite.deny
             };
@@ -110,11 +130,11 @@ client.on(Events.MessageCreate, async (msg) => {
       }
     }
 
-    await msg.channel.send(`✅ تم نسخ الهيكل بنجاح إلى: **${targetGuild.name}**\n تم نسخ الرتب والقنوات مع الحفاظ على خصوصية الرومات.`);
+    await msg.channel.send(`✅ تم تنظيف السيرفر بنجاح ونقل الهيكل من **${sourceGuild.name}** إلى **${targetGuild.name}**.`);
 
   } catch (error) {
     console.error("حدث خطأ:", error);
-    await msg.reply("❌ حدث خطأ تقني، تأكد من صلاحيات البوت في السيرفر الجديد.");
+    await msg.reply("❌ حدث خطأ أثناء العملية. تأكد من أن رتبة البوت هي الأعلى في السيرفر الجديد.");
   }
 });
 
