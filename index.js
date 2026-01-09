@@ -16,7 +16,7 @@ const client = new Client({
 });
 
 /* ================== CONFIGURATION ================== */
-const SOURCE_ID = "855491833442336809"; 
+const SOURCE_ID = "1434304957959372893"; 
 const TARGET_ID = "1415016842476388507";
 const COMMAND_PREFIX = "!نسخ_الهيكل";
 
