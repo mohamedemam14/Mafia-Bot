@@ -23,6 +23,7 @@ const DATA_FILE = path.join(DATA_DIR, "progress.json");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
+/* ================== إعدادات السيرفر ================== */
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 
@@ -44,6 +45,7 @@ const TASKS_RANK_3 = {
   "1459162832699392080": "CPR"
 };
 
+/* ================== أدوات الحفظ ================== */
 function loadProgress() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
   catch (err) { return {}; }
@@ -53,6 +55,7 @@ function saveProgress(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
+/* ================== تنسيق رسالة المتابعة ================== */
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const progressPercent = Math.round((doneTasks.length / totalTasks.length) * 100);
   const totalBars = 10;
@@ -80,21 +83,23 @@ ${list}
 `;
 }
 
+/* ================== إعداد البوت ================== */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessageReactions
   ],
-  partials: [Partials.Message, Partials.Channel]
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
 const app = express();
 app.get("/", (req, res) => res.send("Bot is Online!"));
 app.listen(process.env.PORT || 3000);
 
-// --- حدث عند إرسال المتدرب لرسالة في غرفة المهام ---
+// --- حدث عند إرسال رسالة في غرف المهام ---
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
@@ -105,38 +110,44 @@ client.on(Events.MessageCreate, async (message) => {
     .addComponents(
       new ButtonBuilder()
         .setCustomId('approve_task')
-        .setLabel('اعتماد المهمة ✅')
+        .setLabel('كمل المهمة ✅')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
-        .setCustomId('pending_task')
-        .setLabel('مهمة ناقصة ⚠️')
-        .setStyle(ButtonStyle.Secondary)
+        .setCustomId('missing_photo')
+        .setLabel('باقي صورة 📷')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('reject_task')
+        .setLabel('غير مقبولة ❌')
+        .setStyle(ButtonStyle.Danger)
     );
 
   await message.reply({
-    content: "🛠️ **لوحة التحكم بالمهام (للمسؤولين فقط):**",
+    content: "🛠️ **إدارة المهمة:**",
     components: [row]
   });
 });
 
-// --- حدث الضغط على الأزرار ---
+// --- حدث التفاعل مع الأزرار ---
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
 
   const member = await interaction.guild.members.fetch(interaction.user.id);
   if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
-    return interaction.reply({ content: "❌ عذراً، هذا الزر للمسؤولين فقط.", ephemeral: true });
+    return interaction.reply({ content: "❌ عذراً، هذا الإجراء للمسؤولين فقط.", ephemeral: true });
   }
 
-  const message = await interaction.channel.messages.fetch(interaction.message.reference.messageId);
-  const traineeId = message.author.id;
+  // جلب الرسالة الأصلية للمتدرب
+  const originalMessage = await interaction.channel.messages.fetch(interaction.message.reference.messageId).catch(() => null);
+  if (!originalMessage) return interaction.reply({ content: "تعذر العثور على الرسالة الأصلية.", ephemeral: true });
+
+  const traineeId = originalMessage.author.id;
   const roomId = interaction.channelId;
 
+  // 1. حالة: كمل المهمة (مقبولة)
   if (interaction.customId === 'approve_task') {
     let rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
     let taskName = TASKS_RANK_2[roomId] || TASKS_RANK_3[roomId];
-
-    if (!rank) return interaction.reply({ content: "خطأ في تحديد الرتبة.", ephemeral: true });
 
     const progress = loadProgress();
     if (!progress[traineeId]) {
@@ -145,7 +156,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     const data = progress[traineeId];
     if (data.completedRooms.includes(roomId)) {
-      return interaction.reply({ content: "⚠️ هذه المهمة معتمدة مسبقاً لهذا الشخص.", ephemeral: true });
+      return interaction.reply({ content: "⚠️ هذه المهمة مسجلة مسبقاً.", ephemeral: true });
     }
 
     data.completedRooms.push(roomId);
@@ -168,11 +179,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     saveProgress(progress);
-    await interaction.update({ content: "✅ **تم اعتماد المهمة بنجاح!**", components: [] });
+    await originalMessage.reactions.removeAll().catch(() => {});
+    await originalMessage.react("✅");
+    await interaction.update({ content: "✅ **تم اعتماد المهمة وتحديث السجل.**", components: [] });
 
-  } else if (interaction.customId === 'pending_task') {
+  } 
+  
+  // 2. حالة: باقي صورة
+  else if (interaction.customId === 'missing_photo') {
+    await originalMessage.reactions.removeAll().catch(() => {});
+    await originalMessage.react("📷");
     await interaction.update({ 
-      content: "⚠️ **تم إبلاغ المتدرب بوجود نقص في المهمة. يرجى الإكمال في نفس الروم.**", 
+      content: "⚠️ **تم التنبيه: المهمة ناقصة (باقي صورة).**", 
+      components: [] 
+    });
+  } 
+
+  // 3. حالة: المهمة غير مقبولة
+  else if (interaction.customId === 'reject_task') {
+    await originalMessage.reactions.removeAll().catch(() => {});
+    await originalMessage.react("❌");
+    await interaction.update({ 
+      content: "❌ **تم رفض المهمة. يرجى إعادة المحاولة.**", 
       components: [] 
     });
   }
