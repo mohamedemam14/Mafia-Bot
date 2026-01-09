@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 
 dotenv.config();
 
-// إعداد المسارات لتعمل على Linux/Railway
+// إعداد المسارات لضمان العمل على Railway
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "data");
@@ -26,7 +26,7 @@ if (!fs.existsSync(DATA_FILE)) {
   fs.writeFileSync(DATA_FILE, "{}");
 }
 
-/* ================== إعدادات ================== */
+/* ================== إعدادات السيرفر ================== */
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 
@@ -48,7 +48,7 @@ const TASKS_RANK_3 = {
   "1459162832699392080": "CPR"
 };
 
-/* ================== أدوات الحفظ ================== */
+/* ================== أدوات الحفظ والتحميل ================== */
 function loadProgress() {
   try {
     const data = fs.readFileSync(DATA_FILE, "utf8");
@@ -62,7 +62,37 @@ function saveProgress(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-/* ================== البوت ================== */
+/* ================== تنسيق الرسالة الاحترافي ================== */
+function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
+  const progressPercent = Math.round((doneTasks.length / totalTasks.length) * 100);
+  
+  // رسم بار التقدم بصرياً
+  const totalBars = 10;
+  const completedBars = Math.round((doneTasks.length / totalTasks.length) * totalBars);
+  const progressBar = "🟩".repeat(completedBars) + "⬜".repeat(totalBars - completedBars);
+
+  const list = totalTasks.map(t =>
+    `${doneTasks.includes(t) ? "✅" : "🔘"} **${t}**`
+  ).join("\n");
+
+  return `
+### 📋 نظام متابعة المتدربين
+━━━━━━━━━━━━━━━━━━
+👤 **المتدرب:** <@${userId}>
+🏅 **الرتبة:** \`Rank ${rank}\`
+━━━━━━━━━━━━━━━━━━
+📝 **حالة المهام:**
+${list}
+
+📊 **نسبة الإنجاز:**
+[${progressBar}] **${progressPercent}%**
+(\`${doneTasks.length}\` من أصل \`${totalTasks.length}\` مهام)
+━━━━━━━━━━━━━━━━━━
+📅 *آخر تحديث: <t:${Math.floor(Date.now() / 1000)}:R>*
+`;
+}
+
+/* ================== إعداد البوت والويب سيرفر ================== */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -75,26 +105,10 @@ const client = new Client({
 });
 
 const app = express();
-app.get("/", (req, res) => res.send("Bot Running"));
+app.get("/", (req, res) => res.send("Bot is Online!"));
 app.listen(process.env.PORT || 3000);
 
-function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
-  const list = totalTasks.map(t =>
-    `${doneTasks.includes(t) ? "✅" : "❌"} ${t}`
-  ).join("\n");
-
-  return `
-📋 **متابعة مهام رتبة ${rank}**
-━━━━━━━━━━━━━━
-👤 المتدرب: <@${userId}>
-
-📝 المهام:
-${list}
-━━━━━━━━━━━━━━
-📊 التقدم: ${doneTasks.length} / ${totalTasks.length}
-`;
-}
-
+/* ================== حدث إضافة التفاعل ✅ ================== */
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   if (user.bot || reaction.emoji.name !== "✅") return;
 
@@ -103,6 +117,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     const guild = message.guild;
     const member = await guild.members.fetch(user.id).catch(() => null);
 
+    // التحقق من رتبة المسؤول
     if (!member || !member.roles.cache.has(ADMIN_ROLE_ID)) return;
 
     const roomId = message.channelId;
@@ -143,28 +158,33 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
     if (data.followMessageId) {
       const msg = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
-      if (msg) await msg.edit(content);
-      else {
-        const newMsg = await followChannel.send(content);
+      if (msg) {
+        await msg.edit({ content: content });
+      } else {
+        const newMsg = await followChannel.send({ content: content });
         data.followMessageId = newMsg.id;
       }
     } else {
-      const msg = await followChannel.send(content);
+      const msg = await followChannel.send({ content: content });
       data.followMessageId = msg.id;
     }
 
     saveProgress(progress);
+    
+    // إعادة ضبط التفاعلات لتأكيد القبول
     await message.reactions.removeAll();
     await message.react("✅");
+
   } catch (err) {
-    console.error("Error in Reaction Event:", err);
+    console.error("حدث خطأ أثناء معالجة التفاعل:", err);
   }
 });
 
+/* ================== تشغيل البوت ================== */
 client.once(Events.ClientReady, () => {
-  console.log(`🚀 Bot Online: ${client.user.tag}`);
+  console.log(`🚀 تم تشغيل البوت بنجاح: ${client.user.tag}`);
 });
 
-process.on("unhandledRejection", err => console.error(err));
+process.on("unhandledRejection", err => console.error("خطأ غير معالج:", err));
 
 client.login(process.env.TOKEN);
