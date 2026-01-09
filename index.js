@@ -106,6 +106,22 @@ client.on(Events.MessageCreate, async (message) => {
   const isTaskRoom = TASKS_RANK_2[message.channelId] || TASKS_RANK_3[message.channelId];
   if (!isTaskRoom) return;
 
+  const progress = loadProgress();
+  const data = progress[message.author.id];
+
+  // التحقق إذا كان الشخص قد أنهى هذه المهمة مسبقاً
+  if (data && data.completedRooms.includes(message.channelId)) {
+    const warning = await message.reply(`⚠️ <@${message.author.id}>، لقد أكملت هذه المهمة مسبقاً! يرجى التوجه لمهمة أخرى.`);
+    
+    // حذف رسالة الشخص ورد البوت بعد 4 ثوانٍ
+    setTimeout(() => {
+      message.delete().catch(() => {});
+      warning.delete().catch(() => {});
+    }, 4000);
+    return;
+  }
+
+  // إذا لم يكملها مسبقاً، تظهر لوحة التحكم للمسؤولين
   const row = new ActionRowBuilder()
     .addComponents(
       new ButtonBuilder()
@@ -123,7 +139,7 @@ client.on(Events.MessageCreate, async (message) => {
     );
 
   await message.reply({
-    content: "🛠️ **إدارة المهمة:**",
+    content: "🛠️ **إدارة المهمة (للمسؤولين):**",
     components: [row]
   });
 });
@@ -143,11 +159,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const traineeId = originalMessage.author.id;
   const roomId = interaction.channelId;
 
-  // دالة مساعدة لحذف رسالة الأزرار بعد وقت قصير
   const deleteStatusMessage = () => {
     setTimeout(() => {
       interaction.deleteReply().catch(() => {});
-    }, 3000); // سيتم الحذف بعد 3 ثوانٍ
+    }, 3000);
   };
 
   if (interaction.customId === 'approve_task') {
@@ -186,25 +201,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
     saveProgress(progress);
     await originalMessage.reactions.removeAll().catch(() => {});
     await originalMessage.react("✅");
-    await interaction.update({ content: "✅ **تم الاعتماد! سيتم حذف هذه الرسالة تلقائياً.**", components: [] });
+    await interaction.update({ content: "✅ **تم الاعتماد وتحديث السجل.**", components: [] });
     deleteStatusMessage();
 
   } else if (interaction.customId === 'missing_photo') {
     await originalMessage.reactions.removeAll().catch(() => {});
     await originalMessage.react("📷");
-    await interaction.update({ 
-      content: "⚠️ **نقص صور! سيتم حذف هذه الرسالة تلقائياً.**", 
-      components: [] 
-    });
+    await interaction.update({ content: "⚠️ **نقص صور! يرجى الإكمال.**", components: [] });
     deleteStatusMessage();
 
   } else if (interaction.customId === 'reject_task') {
     await originalMessage.reactions.removeAll().catch(() => {});
     await originalMessage.react("❌");
-    await interaction.update({ 
-      content: "❌ **مرفوضة! سيتم حذف هذه الرسالة تلقائياً.**", 
-      components: [] 
-    });
+    await interaction.update({ content: "❌ **المهمة مرفوضة.**", components: [] });
     deleteStatusMessage();
   }
 });
