@@ -13,9 +13,6 @@ import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from 'url';
-import { blockhash64 } from 'blockhash-core';
-import { createCanvas, loadImage } from 'canvas';
-import Tesseract from 'tesseract.js';
 
 dotenv.config();
 
@@ -27,13 +24,11 @@ const DATA_FILE = path.join(DATA_DIR, "progress.json");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
-/* ================== الإعدادات (الأيديهات الأصلية) ================== */
+/* ================== الإعدادات (الأيديهات) ================== */
 
-// 1. نظام كشف التزوير (اضبط الأيدي الخاص بروم الفحص هنا)
-const CHECK_ROOM_ID = "1457423689195978964"; // الروم الذي سينظر فيه البوت لكشف التزوير
-const ADMIN_LOG_CHANNEL_ID = "1459208046403391560"; // سيتم إرسال بلاغات التزوير هنا
+const CHECK_ROOM_ID = "1457423689195978964"; // الروم الذي يفحص فيه النصوص المتكررة
+const ADMIN_LOG_CHANNEL_ID = "1459208046403391560"; // روم إرسال بلاغات التكرار
 
-// 2. إعدادات الإدارة والترقيات
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 const NOTIFICATION_ROOM_ID = "1459162853696077982"; 
@@ -42,7 +37,7 @@ const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
 const READY_COMBINED_ROOM_ID = "1459162779419414627";
 
-// 3. غرف المهام الأصلية
+// غرف المهام
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
   "1459162799212200156": "الاستقبال",
@@ -61,7 +56,8 @@ const TASKS_RANK_3 = {
   "1459162832699392080": "CPR"
 };
 
-const imageCache = new Map();
+// ذاكرة تخزين النصوص المكررة
+const textCache = new Map();
 
 /* ================== دوال المساعدة ================== */
 
@@ -96,52 +92,49 @@ const client = new Client({
 });
 
 const app = express();
-app.get("/", (req, res) => res.send("Active"));
+app.get("/", (req, res) => res.send("Bot is Online"));
 app.listen(process.env.PORT || 3000);
 
-client.on(Events.ClientReady, () => console.log(`✅ ${client.user.tag} Online`));
+client.on(Events.ClientReady, () => console.log(`✅ ${client.user.tag} جاهز`));
 
-/* ================== معالجة الرسائل (الفحص + المهام) ================== */
+/* ================== معالجة الرسائل ================== */
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
-  // أولاً: كشف التزوير في روم واحد فقط (CHECK_ROOM_ID)
+  // 1. نظام كشف تكرار "النص" في روم الفحص
   if (message.channelId === CHECK_ROOM_ID) {
-    if (message.attachments.size > 0) {
-      for (const attachment of message.attachments.values()) {
-        try {
-          const img = await loadImage(attachment.url);
-          const canvas = createCanvas(img.width, img.height);
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0);
-          const hash = blockhash64(ctx.getImageData(0, 0, img.width, img.height), 16);
-
-          if (imageCache.has(hash)) {
-            const original = imageCache.get(hash);
-            const adminLog = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID).catch(() => null);
-            if (adminLog) {
-              const alertEmbed = new EmbedBuilder()
-                .setTitle('🚨 اكتشاف تقرير مكرر!')
-                .setColor(0xFF0000)
-                .setDescription(`تم اكتشاف محاولة تكرار من <@${message.author.id}>`)
-                .addFields(
-                  { name: 'الرسالة الحالية', value: `[اضغط هنا](${message.url})`, inline: true },
-                  { name: 'الرسالة الأصلية', value: `[اضغط هنا](${original.url})`, inline: true }
-                )
-                .setTimestamp();
-              await adminLog.send({ embeds: [alertEmbed] });
-            }
-          } else {
-            imageCache.set(hash, { url: message.url, author: message.author.id });
-          }
-        } catch (e) { console.error(e); }
+    const msgContent = message.content.trim();
+    
+    // الفحص يعمل فقط إذا كان هناك نص مرفق مع صورة
+    if (message.attachments.size > 0 && msgContent.length > 0) {
+      
+      if (textCache.has(msgContent)) {
+        const original = textCache.get(msgContent);
+        const adminLog = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID).catch(() => null);
+        
+        if (adminLog) {
+          const alertEmbed = new EmbedBuilder()
+            .setTitle('🚨 اكتشاف بيانات مكررة!')
+            .setColor(0xFF0000)
+            .setDescription(`المستخدم <@${message.author.id}> أرسل نفس البيانات المكتوبة مسبقاً.`)
+            .addFields(
+              { name: 'البيانات المكررة', value: `\`\`\`${msgContent}\`\`\`` },
+              { name: 'الرسالة الأصلية', value: `[انتقل للأصل](${original.url})`, inline: true },
+              { name: 'الرسالة الحالية', value: `[انتقل للحالية](${message.url})`, inline: true }
+            )
+            .setTimestamp();
+          await adminLog.send({ embeds: [alertEmbed] });
+        }
+      } else {
+        // حفظ النص لأول مرة
+        textCache.set(msgContent, { url: message.url, author: message.author.id });
       }
     }
-    return; 
+    return;
   }
 
-  // ثانياً: نظام المهام (في رومات المهام فقط)
+  // 2. نظام المهام (في رومات المهام)
   const isTaskRoom = TASKS_RANK_2[message.channelId] || TASKS_RANK_3[message.channelId];
   if (!isTaskRoom) return;
 
@@ -160,7 +153,7 @@ client.on(Events.MessageCreate, async (message) => {
   await message.reply({ content: `⚙️ **إدارة المهمة لـ <@${message.author.id}>:**`, components: [row] });
 });
 
-/* ================== نظام الأزرار والترقية ================== */
+/* ================== نظام الأزرار ================== */
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
@@ -187,8 +180,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
     const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID);
     
-    // بناء الرسالة وتحديثها
-    const followMsgText = `### 📑 ملف المتابعة لـ <@${traineeId}>\nرتبة المستهدفة: ${rank}\nالتقدم: ${data.tasks.length}/${allTasks.length}`;
+    const followMsgText = `### 📑 ملف المتابعة لـ <@${traineeId}>\nالتقدم: ${data.tasks.length}/${allTasks.length}`;
     if (data.followMessageId) {
        const m = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
        if (m) await m.edit(followMsgText); else await followChannel.send(followMsgText).then(msg => data.followMessageId = msg.id);
@@ -199,7 +191,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (data.tasks.length === allTasks.length && !data.upgradeNotified) {
       data.upgradeNotified = true;
       const nRoom = await client.channels.fetch(NOTIFICATION_ROOM_ID).catch(() => null);
-      if (nRoom) await nRoom.send(`تهانينا <@${traineeId}>! أكملت تدريبك. موعد الترقية: ${getNextUpgradeDay()}`);
+      if (nRoom) await nRoom.send(`تهانينا <@${traineeId}>! موعد الترقية: ${getNextUpgradeDay()}`);
     }
 
     saveProgress(progress);
