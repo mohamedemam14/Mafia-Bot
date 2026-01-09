@@ -137,14 +137,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return interaction.reply({ content: "❌ عذراً، هذا الإجراء للمسؤولين فقط.", ephemeral: true });
   }
 
-  // جلب الرسالة الأصلية للمتدرب
   const originalMessage = await interaction.channel.messages.fetch(interaction.message.reference.messageId).catch(() => null);
   if (!originalMessage) return interaction.reply({ content: "تعذر العثور على الرسالة الأصلية.", ephemeral: true });
 
   const traineeId = originalMessage.author.id;
   const roomId = interaction.channelId;
 
-  // 1. حالة: كمل المهمة (مقبولة)
+  // دالة مساعدة لحذف رسالة الأزرار بعد وقت قصير
+  const deleteStatusMessage = () => {
+    setTimeout(() => {
+      interaction.deleteReply().catch(() => {});
+    }, 3000); // سيتم الحذف بعد 3 ثوانٍ
+  };
+
   if (interaction.customId === 'approve_task') {
     let rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
     let taskName = TASKS_RANK_2[roomId] || TASKS_RANK_3[roomId];
@@ -181,28 +186,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
     saveProgress(progress);
     await originalMessage.reactions.removeAll().catch(() => {});
     await originalMessage.react("✅");
-    await interaction.update({ content: "✅ **تم اعتماد المهمة وتحديث السجل.**", components: [] });
+    await interaction.update({ content: "✅ **تم الاعتماد! سيتم حذف هذه الرسالة تلقائياً.**", components: [] });
+    deleteStatusMessage();
 
-  } 
-  
-  // 2. حالة: باقي صورة
-  else if (interaction.customId === 'missing_photo') {
+  } else if (interaction.customId === 'missing_photo') {
     await originalMessage.reactions.removeAll().catch(() => {});
     await originalMessage.react("📷");
     await interaction.update({ 
-      content: "⚠️ **تم التنبيه: المهمة ناقصة (باقي صورة).**", 
+      content: "⚠️ **نقص صور! سيتم حذف هذه الرسالة تلقائياً.**", 
       components: [] 
     });
-  } 
+    deleteStatusMessage();
 
-  // 3. حالة: المهمة غير مقبولة
-  else if (interaction.customId === 'reject_task') {
+  } else if (interaction.customId === 'reject_task') {
     await originalMessage.reactions.removeAll().catch(() => {});
     await originalMessage.react("❌");
     await interaction.update({ 
-      content: "❌ **تم رفض المهمة. يرجى إعادة المحاولة.**", 
+      content: "❌ **مرفوضة! سيتم حذف هذه الرسالة تلقائياً.**", 
       components: [] 
     });
+    deleteStatusMessage();
   }
 });
 
