@@ -26,7 +26,7 @@ if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 /* ================== الإعدادات (تأكد من وضع الأيدي الصحيحة) ================== */
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
-const NOTIFICATION_ROOM_ID = "1459162819072102574"; // روم منشن المتدرب الجاهز
+const NOTIFICATION_ROOM_ID = "1459162853696077982"; // روم منشن المتدرب الجاهز
 
 const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
