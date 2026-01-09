@@ -1,99 +1,160 @@
-import "dotenv/config";
-import { 
-  Client, 
-  GatewayIntentBits, 
-  ChannelType, 
-  PermissionFlagsBits,
-  Events 
+import {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  Events
 } from "discord.js";
+import express from "express";
+import dotenv from "dotenv";
+import fs from "fs";
 
+dotenv.config();
+
+/* ================== إعدادات ================== */
+const ADMIN_ROLE_ID = "ADMIN_ROLE_ID";
+const FOLLOW_ROOM_ID = "FOLLOW_ROOM_ID";
+const DATA_FILE = "./data/progress.json";
+
+/* ===== مهام Rank 2 ===== */
+const TASKS_RANK_2 = {
+  "1459162810130108448": "الإرشاد",
+  "1459162799212200156": "الاستقبال",
+  "1459162816043810984": "المخالفات",
+  "1459162802781552822": "الفعاليات",
+  "1459162813363654778": "الإعلام",
+  "1459162806786981919": "CPR"
+};
+
+/* ===== مهام Rank 3 ===== */
+const TASKS_RANK_3 = {
+  "1459162835333419120": "الإرشاد",
+  "1459162827465035818": "الاستقبال",
+  "1459162840597266587": "المخالفات",
+  "1459162830086606878": "الفعاليات",
+  "1459162837963378728": "الإعلام",
+  "1459162832699392080": "CPR"
+};
+
+/* ================== أدوات الحفظ ================== */
+function loadProgress() {
+  if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
+  return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+}
+
+function saveProgress(data) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+}
+
+/* ================== البوت ================== */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers
+  ],
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
-/* ================== CONFIGURATION ================== */
-const SOURCE_ID = "1434304957959372893"; 
-const TARGET_ID = "1415016842476388507";
-const COMMAND_PREFIX = "!نسخ_الهيكل";
+/* ================== Keep Alive ================== */
+const app = express();
+app.get("/", (req, res) => res.send("Bot Running"));
+app.listen(process.env.PORT || 3000);
 
-// دالة للانتظار لتجنب الحظر المؤقت من ديسكورد
-const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+/* ================== رسالة المتابعة ================== */
+function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
+  const list = totalTasks.map(t =>
+    `${doneTasks.includes(t) ? "✅" : "❌"} ${t}`
+  ).join("\n");
 
-/* ================== LOGIC ================== */
+  return `
+📋 **متابعة مهام رتبة ${rank}**
+━━━━━━━━━━━━━━
+👤 المتدرب: <@${userId}>
+
+📝 المهام:
+${list}
+━━━━━━━━━━━━━━
+📊 التقدم: ${doneTasks.length} / ${totalTasks.length}
+
+🔗 https://cdn.discordapp.com/attachments/1449506416065908816/1454546137439801354/1571650a7c706000-1.gif
+`;
+}
+
+/* ================== اعتماد المهام ================== */
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  if (user.bot || reaction.emoji.name !== "✅") return;
+
+  const message = await reaction.message.fetch();
+  const guild = message.guild;
+
+  const member = await guild.members.fetch(user.id).catch(() => null);
+  if (!member || !member.roles.cache.has(ADMIN_ROLE_ID)) return;
+
+  const roomId = message.channelId;
+  const traineeId = message.author.id;
+
+  let rank = null;
+  let taskName = null;
+
+  if (TASKS_RANK_2[roomId]) {
+    rank = 2;
+    taskName = TASKS_RANK_2[roomId];
+  } else if (TASKS_RANK_3[roomId]) {
+    rank = 3;
+    taskName = TASKS_RANK_3[roomId];
+  } else return;
+
+  const progress = loadProgress();
+
+  if (!progress[traineeId]) {
+    progress[traineeId] = {
+      rank,
+      tasks: [],
+      completedRooms: [],
+      followMessageId: null
+    };
+  }
+
+  const data = progress[traineeId];
+
+  // 🔒 منع اعتماد نفس المهمة مرة تانية
+  if (data.completedRooms.includes(roomId)) return;
+
+  data.completedRooms.push(roomId);
+  data.tasks.push(taskName);
+
+  const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
+  const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID);
+
+  const content = buildFollowMessage(
+    traineeId,
+    rank,
+    data.tasks,
+    allTasks
+  );
+
+  if (data.followMessageId) {
+    const msg = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
+    if (msg) await msg.edit(content);
+  } else {
+    const msg = await followChannel.send(content);
+    data.followMessageId = msg.id;
+  }
+
+  saveProgress(progress);
+
+  await message.reactions.removeAll();
+  await message.react("✅");
+});
+
+/* ================== Ready ================== */
 client.once(Events.ClientReady, () => {
-  console.log(`✅ البوت جاهز لنسخ الرومات: ${client.user.tag}`);
+  console.log(`🚀 Bot Online: ${client.user.tag}`);
 });
 
-client.on(Events.MessageCreate, async (msg) => {
-  if (msg.content !== COMMAND_PREFIX || msg.author.bot) return;
+/* ================== حماية ================== */
+process.on("unhandledRejection", err => console.error(err));
 
-  if (!msg.member.permissions.has(PermissionFlagsBits.Administrator)) {
-    return msg.reply("❌ هذا الأمر للمسؤولين فقط.");
-  }
-
-  const sourceGuild = client.guilds.cache.get(SOURCE_ID);
-  const targetGuild = client.guilds.cache.get(TARGET_ID);
-
-  if (!sourceGuild || !targetGuild) {
-    return msg.reply("❌ تأكد من وجود البوت في السيرفرين وصحة الـ IDs.");
-  }
-
-  try {
-    await msg.reply("🧹 جاري مسح الرومات القديمة وبناء الرومات الجديدة (بدون لمس الرتب)...");
-
-    // --- المرحلة 1: تنظيف القنوات في السيرفر الجديد ---
-    const targetChannels = await targetGuild.channels.fetch();
-    console.log("🧹 جاري حذف القنوات...");
-    for (const [id, channel] of targetChannels) {
-      await channel.delete().catch(() => {});
-      await wait(400); // مهلة بسيطة
-    }
-
-    // --- المرحلة 2: نسخ القنوات والفئات من المصدر ---
-    const sourceChannels = await sourceGuild.channels.fetch();
-    
-    // تصفية وترتيب الفئات (Categories)
-    const categories = sourceChannels
-      .filter(c => c.type === ChannelType.GuildCategory)
-      .sort((a, b) => a.position - b.position);
-
-    console.log("📁 جاري بناء الفئات والقنوات...");
-    for (const [id, category] of categories) {
-      // إنشاء الفئة
-      const newCategory = await targetGuild.channels.create({
-        name: category.name,
-        type: ChannelType.GuildCategory
-      });
-
-      // جلب القنوات التابعة لهذه الفئة وترتيبها
-      const children = sourceChannels
-        .filter(c => c.parentId === category.id)
-        .sort((a, b) => a.position - b.position);
-
-      for (const [childId, child] of children) {
-        // إنشاء القناة داخل الفئة
-        await targetGuild.channels.create({
-          name: child.name,
-          type: child.type,
-          parent: newCategory.id,
-          topic: child.topic,
-          nsfw: child.nsfw
-        }).catch(e => console.log(`فشل إنشاء القناة: ${child.name}`));
-        
-        await wait(400); // مهلة لتجنب Rate Limit
-      }
-    }
-
-    await msg.channel.send(`✅ تمت العملية بنجاح! تم نسخ هيكل القنوات من **${sourceGuild.name}**.`);
-
-  } catch (error) {
-    console.error("حدث خطأ:", error);
-    await msg.reply("❌ حدث خطأ أثناء النسخ. تأكد من صلاحيات البوت في السيرفر الجديد.");
-  }
-});
-
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.TOKEN);
