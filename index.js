@@ -2,7 +2,10 @@ import {
   Client,
   GatewayIntentBits,
   Partials,
-  Events
+  Events,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } from "discord.js";
 import express from "express";
 import dotenv from "dotenv";
@@ -12,21 +15,14 @@ import { fileURLToPath } from 'url';
 
 dotenv.config();
 
-// إعداد المسارات لضمان العمل على Railway
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "progress.json");
 
-/* ================== التأكد من وجود المجلد والملف ================== */
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-if (!fs.existsSync(DATA_FILE)) {
-  fs.writeFileSync(DATA_FILE, "{}");
-}
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
-/* ================== إعدادات السيرفر ================== */
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 
@@ -48,25 +44,17 @@ const TASKS_RANK_3 = {
   "1459162832699392080": "CPR"
 };
 
-/* ================== أدوات الحفظ والتحميل ================== */
 function loadProgress() {
-  try {
-    const data = fs.readFileSync(DATA_FILE, "utf8");
-    return JSON.parse(data);
-  } catch (err) {
-    return {};
-  }
+  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
+  catch (err) { return {}; }
 }
 
 function saveProgress(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-/* ================== تنسيق الرسالة الاحترافي ================== */
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const progressPercent = Math.round((doneTasks.length / totalTasks.length) * 100);
-  
-  // رسم بار التقدم بصرياً
   const totalBars = 10;
   const completedBars = Math.round((doneTasks.length / totalTasks.length) * totalBars);
   const progressBar = "🟩".repeat(completedBars) + "⬜".repeat(totalBars - completedBars);
@@ -92,99 +80,106 @@ ${list}
 `;
 }
 
-/* ================== إعداد البوت والويب سيرفر ================== */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers
   ],
-  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
+  partials: [Partials.Message, Partials.Channel]
 });
 
 const app = express();
 app.get("/", (req, res) => res.send("Bot is Online!"));
 app.listen(process.env.PORT || 3000);
 
-/* ================== حدث إضافة التفاعل ✅ ================== */
-client.on(Events.MessageReactionAdd, async (reaction, user) => {
-  if (user.bot || reaction.emoji.name !== "✅") return;
+// --- حدث عند إرسال المتدرب لرسالة في غرفة المهام ---
+client.on(Events.MessageCreate, async (message) => {
+  if (message.author.bot) return;
 
-  try {
-    const message = await reaction.message.fetch();
-    const guild = message.guild;
-    const member = await guild.members.fetch(user.id).catch(() => null);
+  const isTaskRoom = TASKS_RANK_2[message.channelId] || TASKS_RANK_3[message.channelId];
+  if (!isTaskRoom) return;
 
-    // التحقق من رتبة المسؤول
-    if (!member || !member.roles.cache.has(ADMIN_ROLE_ID)) return;
+  const row = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId('approve_task')
+        .setLabel('اعتماد المهمة ✅')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('pending_task')
+        .setLabel('مهمة ناقصة ⚠️')
+        .setStyle(ButtonStyle.Secondary)
+    );
 
-    const roomId = message.channelId;
-    const traineeId = message.author.id;
+  await message.reply({
+    content: "🛠️ **لوحة التحكم بالمهام (للمسؤولين فقط):**",
+    components: [row]
+  });
+});
 
-    let rank = null;
-    let taskName = null;
+// --- حدث الضغط على الأزرار ---
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isButton()) return;
 
-    if (TASKS_RANK_2[roomId]) {
-      rank = 2;
-      taskName = TASKS_RANK_2[roomId];
-    } else if (TASKS_RANK_3[roomId]) {
-      rank = 3;
-      taskName = TASKS_RANK_3[roomId];
-    } else return;
+  const member = await interaction.guild.members.fetch(interaction.user.id);
+  if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
+    return interaction.reply({ content: "❌ عذراً، هذا الزر للمسؤولين فقط.", ephemeral: true });
+  }
+
+  const message = await interaction.channel.messages.fetch(interaction.message.reference.messageId);
+  const traineeId = message.author.id;
+  const roomId = interaction.channelId;
+
+  if (interaction.customId === 'approve_task') {
+    let rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
+    let taskName = TASKS_RANK_2[roomId] || TASKS_RANK_3[roomId];
+
+    if (!rank) return interaction.reply({ content: "خطأ في تحديد الرتبة.", ephemeral: true });
 
     const progress = loadProgress();
-
     if (!progress[traineeId]) {
-      progress[traineeId] = {
-        rank,
-        tasks: [],
-        completedRooms: [],
-        followMessageId: null
-      };
+      progress[traineeId] = { rank, tasks: [], completedRooms: [], followMessageId: null };
     }
 
     const data = progress[traineeId];
-    if (data.completedRooms.includes(roomId)) return;
+    if (data.completedRooms.includes(roomId)) {
+      return interaction.reply({ content: "⚠️ هذه المهمة معتمدة مسبقاً لهذا الشخص.", ephemeral: true });
+    }
 
     data.completedRooms.push(roomId);
     data.tasks.push(taskName);
 
     const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
     const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID);
-
     const content = buildFollowMessage(traineeId, rank, data.tasks, allTasks);
 
     if (data.followMessageId) {
       const msg = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
-      if (msg) {
-        await msg.edit({ content: content });
-      } else {
-        const newMsg = await followChannel.send({ content: content });
+      if (msg) await msg.edit({ content });
+      else {
+        const newMsg = await followChannel.send({ content });
         data.followMessageId = newMsg.id;
       }
     } else {
-      const msg = await followChannel.send({ content: content });
+      const msg = await followChannel.send({ content });
       data.followMessageId = msg.id;
     }
 
     saveProgress(progress);
-    
-    // إعادة ضبط التفاعلات لتأكيد القبول
-    await message.reactions.removeAll();
-    await message.react("✅");
+    await interaction.update({ content: "✅ **تم اعتماد المهمة بنجاح!**", components: [] });
 
-  } catch (err) {
-    console.error("حدث خطأ أثناء معالجة التفاعل:", err);
+  } else if (interaction.customId === 'pending_task') {
+    await interaction.update({ 
+      content: "⚠️ **تم إبلاغ المتدرب بوجود نقص في المهمة. يرجى الإكمال في نفس الروم.**", 
+      components: [] 
+    });
   }
 });
 
-/* ================== تشغيل البوت ================== */
 client.once(Events.ClientReady, () => {
-  console.log(`🚀 تم تشغيل البوت بنجاح: ${client.user.tag}`);
+  console.log(`🚀 Bot Online: ${client.user.tag}`);
 });
-
-process.on("unhandledRejection", err => console.error("خطأ غير معالج:", err));
 
 client.login(process.env.TOKEN);
