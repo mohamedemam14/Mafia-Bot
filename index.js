@@ -25,8 +25,8 @@ if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
 /* ================== الإعدادات (الأيديهات) ================== */
 
-const CHECK_ROOM_ID = "ضع_هنا_أيدي_روم_الفحص"; 
-const ADMIN_LOG_CHANNEL_ID = "1459162853696077982"; 
+const CHECK_ROOM_ID = "1457423689195978964"; 
+const ADMIN_LOG_CHANNEL_ID = "1459208046403391560"; 
 
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
