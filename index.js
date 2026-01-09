@@ -5,13 +5,17 @@ import {
   Events,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  EmbedBuilder
 } from "discord.js";
 import express from "express";
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from 'url';
+import { blockhash64 } from 'blockhash-core';
+import { createCanvas, loadImage } from 'canvas';
+import Tesseract from 'tesseract.js';
 
 dotenv.config();
 
@@ -23,15 +27,22 @@ const DATA_FILE = path.join(DATA_DIR, "progress.json");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
-/* ================== الإعدادات (تأكد من وضع الأيدي الصحيحة) ================== */
+/* ================== الإعدادات (الأيديهات الأصلية) ================== */
+
+// 1. نظام كشف التزوير (اضبط الأيدي الخاص بروم الفحص هنا)
+const CHECK_ROOM_ID = "1457423689195978964"; // الروم الذي سينظر فيه البوت لكشف التزوير
+const ADMIN_LOG_CHANNEL_ID = "1459208046403391560"; // سيتم إرسال بلاغات التزوير هنا
+
+// 2. إعدادات الإدارة والترقيات
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
-const NOTIFICATION_ROOM_ID = "1459162853696077982"; // روم منشن المتدرب الجاهز
+const NOTIFICATION_ROOM_ID = "1459162853696077982"; 
 
 const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
 const READY_COMBINED_ROOM_ID = "1459162779419414627";
 
+// 3. غرف المهام الأصلية
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
   "1459162799212200156": "الاستقبال",
@@ -50,7 +61,9 @@ const TASKS_RANK_3 = {
   "1459162832699392080": "CPR"
 };
 
-/* ================== دوال المساعدة والذكاء الاصطناعي للمواعيد ================== */
+const imageCache = new Map();
+
+/* ================== دوال المساعدة ================== */
 
 function loadProgress() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
@@ -60,61 +73,25 @@ function saveProgress(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-// دالة لتحديد اليوم القادم للترقية
 function getNextUpgradeDay() {
-  const daysMap = {
-    0: "الأحد", 1: "الاثنين", 2: "الثلاثاء", 
-    3: "الأربعاء", 4: "الخميس", 5: "الجمعة", 6: "السبت"
-  };
-  const upgradeDays = [6, 2, 4]; // السبت(6)، الثلاثاء(2)، الخميس(4)
+  const upgradeDays = [6, 2, 4]; 
+  const daysMap = { 0: "الأحد", 1: "الاثنين", 2: "الثلاثاء", 3: "الأربعاء", 4: "الخميس", 5: "الجمعة", 6: "السبت" };
   const now = new Date();
   const today = now.getDay();
-
-  // البحث عن أقرب يوم من قائمة أيام الترقية
   let nextDay = upgradeDays.find(d => d >= today);
-  if (nextDay === undefined) nextDay = upgradeDays[0]; // إذا انتهى الأسبوع، اختر أول يوم متاح الأسبوع القادم
-
+  if (nextDay === undefined) nextDay = upgradeDays[0];
   return daysMap[nextDay];
 }
 
-/* ================== نماذج الرسائل الاحترافية ================== */
-
-function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
-  const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
-  const progressBar = "🔹".repeat(Math.round(percent/10)) + "🔸".repeat(10 - Math.round(percent/10));
-  const list = totalTasks.map(t => doneTasks.includes(t) ? `┃ ✅ **${t}**` : `┃ 🔘 *${t}*`).join("\n");
-
-  return `### 📑 مـلف تـدريب المـوظفين\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة المستهدفة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم:**\n┃ ${progressBar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`) من المتطلبات.`;
-}
-
-function buildPersonalNotification(userId) {
-  const day = getNextUpgradeDay();
-  return `
-### 🔔 إشعار إتمام مرحلة التدريب
-━━━━━━━━━━━━━━━━━━━━
-مرحباً بك <@${userId}>،
-
-لقد أتممت جميع المهام المطلوبة بنجاح وأصبحت الآن **جاهزاً للترقية**.
-المواعيد الرسمية للترقيات هي:
-🗓️ **السبت - الثلاثاء - الخميس**
-
-⚠️ أقرب موعد لك هو يوم **( ${day} )**
-⏰ من الساعة **10:00 مساءً** إلى **12:00 منتصف الليل**
-📍 بتوقيت مكة المكرمة.
-
-*نرجو منك التواجد في الموعد المحدد.*
-━━━━━━━━━━━━━━━━━━━━
-`;
-}
-
-function buildReadyToUpgradeMessage(userId, rank) {
-  return `🎊 **تـهـنـئـة إتـمـام مـهـام** 🎊\n━━━━━━━━━━━━━━━━━━━━\n👤 **المتدرب:** <@${userId}>\n🏅 **الرتبة المنجزة:** \`Rank ${rank}\`\n✅ **الحالة:** جاهز للترقية رسمياً\n\n🔗 https://cdn.discordapp.com/attachments/1449506416065908816/1454546137439801354/1571650a7c706000-1.gif\n━━━━━━━━━━━━━━━━━━━━`;
-}
-
-/* ================== الأحداث والمنطق ================== */
+/* ================== تشغيل البوت ================== */
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
+  intents: [
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.MessageContent, 
+    GatewayIntentBits.GuildMembers
+  ],
   partials: [Partials.Message, Partials.Channel]
 });
 
@@ -122,16 +99,56 @@ const app = express();
 app.get("/", (req, res) => res.send("Active"));
 app.listen(process.env.PORT || 3000);
 
+client.on(Events.ClientReady, () => console.log(`✅ ${client.user.tag} Online`));
+
+/* ================== معالجة الرسائل (الفحص + المهام) ================== */
+
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
+
+  // أولاً: كشف التزوير في روم واحد فقط (CHECK_ROOM_ID)
+  if (message.channelId === CHECK_ROOM_ID) {
+    if (message.attachments.size > 0) {
+      for (const attachment of message.attachments.values()) {
+        try {
+          const img = await loadImage(attachment.url);
+          const canvas = createCanvas(img.width, img.height);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const hash = blockhash64(ctx.getImageData(0, 0, img.width, img.height), 16);
+
+          if (imageCache.has(hash)) {
+            const original = imageCache.get(hash);
+            const adminLog = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID).catch(() => null);
+            if (adminLog) {
+              const alertEmbed = new EmbedBuilder()
+                .setTitle('🚨 اكتشاف تقرير مكرر!')
+                .setColor(0xFF0000)
+                .setDescription(`تم اكتشاف محاولة تكرار من <@${message.author.id}>`)
+                .addFields(
+                  { name: 'الرسالة الحالية', value: `[اضغط هنا](${message.url})`, inline: true },
+                  { name: 'الرسالة الأصلية', value: `[اضغط هنا](${original.url})`, inline: true }
+                )
+                .setTimestamp();
+              await adminLog.send({ embeds: [alertEmbed] });
+            }
+          } else {
+            imageCache.set(hash, { url: message.url, author: message.author.id });
+          }
+        } catch (e) { console.error(e); }
+      }
+    }
+    return; 
+  }
+
+  // ثانياً: نظام المهام (في رومات المهام فقط)
   const isTaskRoom = TASKS_RANK_2[message.channelId] || TASKS_RANK_3[message.channelId];
   if (!isTaskRoom) return;
 
   const progress = loadProgress();
-  if (progress[message.author.id] && progress[message.author.id].completedRooms.includes(message.channelId)) {
+  if (progress[message.author.id]?.completedRooms.includes(message.channelId)) {
     const warning = await message.reply(`⛔ لقد أنهيت هذه المهمة مسبقاً.`);
-    setTimeout(() => { message.delete().catch(() => {}); warning.delete().catch(() => {}); }, 3000);
-    return;
+    return setTimeout(() => { message.delete().catch(() => {}); warning.delete().catch(() => {}); }, 3000);
   }
 
   const row = new ActionRowBuilder().addComponents(
@@ -142,6 +159,8 @@ client.on(Events.MessageCreate, async (message) => {
 
   await message.reply({ content: `⚙️ **إدارة المهمة لـ <@${message.author.id}>:**`, components: [row] });
 });
+
+/* ================== نظام الأزرار والترقية ================== */
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
@@ -167,37 +186,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
     const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID);
-    await (data.followMessageId ? (await followChannel.messages.fetch(data.followMessageId)).edit({ content: buildFollowMessage(traineeId, rank, data.tasks, allTasks) }) : followChannel.send({ content: buildFollowMessage(traineeId, rank, data.tasks, allTasks) }).then(m => data.followMessageId = m.id));
+    
+    // بناء الرسالة وتحديثها
+    const followMsgText = `### 📑 ملف المتابعة لـ <@${traineeId}>\nرتبة المستهدفة: ${rank}\nالتقدم: ${data.tasks.length}/${allTasks.length}`;
+    if (data.followMessageId) {
+       const m = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
+       if (m) await m.edit(followMsgText); else await followChannel.send(followMsgText).then(msg => data.followMessageId = msg.id);
+    } else {
+       await followChannel.send(followMsgText).then(msg => data.followMessageId = msg.id);
+    }
 
-    // إرسال تنبيهات الترقية عند الاكتمال
     if (data.tasks.length === allTasks.length && !data.upgradeNotified) {
       data.upgradeNotified = true;
-      
-      // 1. روم الرتبة الخاص
-      const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
-      if (rRoom) await rRoom.send(buildReadyToUpgradeMessage(traineeId, rank));
-
-      // 2. روم المنشن الشخصي والموعد (الجديد)
       const nRoom = await client.channels.fetch(NOTIFICATION_ROOM_ID).catch(() => null);
-      if (nRoom) await nRoom.send(buildPersonalNotification(traineeId));
-
-      // 3. الروم المشترك
-      const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
-      if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **الاسم:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`${rank}\`\n> ✨ **جاهز للترقية :** ✅`);
+      if (nRoom) await nRoom.send(`تهانينا <@${traineeId}>! أكملت تدريبك. موعد الترقية: ${getNextUpgradeDay()}`);
     }
 
     saveProgress(progress);
-    await originalMessage.reactions.removeAll().catch(() => {});
     await originalMessage.react("✅");
     await interaction.update({ content: "⭐ تم الاعتماد.", components: [] });
-    setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
   } else {
-    // منطق الرفض والنقص
-    const emoji = interaction.customId === 'missing_photo' ? "📷" : "❌";
-    await originalMessage.reactions.removeAll().catch(() => {});
-    await originalMessage.react(emoji);
-    await interaction.update({ content: "⚠️ تم تحديث الحالة.", components: [] });
-    setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
+    await originalMessage.react(interaction.customId === 'missing_photo' ? "📷" : "❌");
+    await interaction.update({ content: "⚠️ تم التحديث.", components: [] });
   }
 });
 
