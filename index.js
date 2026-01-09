@@ -11,8 +11,8 @@ import fs from "fs";
 dotenv.config();
 
 /* ================== إعدادات ================== */
-const ADMIN_ROLE_ID = "ADMIN_ROLE_ID";
-const FOLLOW_ROOM_ID = "FOLLOW_ROOM_ID";
+const ADMIN_ROLE_ID = "1459164560480145576";
+const FOLLOW_ROOM_ID = "1459162738503847969";
 const DATA_FILE = "./data/progress.json";
 
 /* ===== مهام Rank 2 ===== */
