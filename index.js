@@ -15,78 +15,69 @@ const client = new Client({
   ]
 });
 
-/* ================== CONFIGURATION ================== */
 const SOURCE_ID = "855491833442336809"; 
 const TARGET_ID = "1415016842476388507";
 const COMMAND_PREFIX = "!نسخ_الهيكل";
 
-/* ================== LOGIC ================== */
-client.once(Events.ClientReady, () => {
-  console.log(`✅ البوت متصل وجاهز باسم: ${client.user.tag}`);
-});
+// دالة مساعدة للانتظار لتجنب الـ Rate Limit
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 client.on(Events.MessageCreate, async (msg) => {
   if (msg.content !== COMMAND_PREFIX || msg.author.bot) return;
-
-  if (!msg.member.permissions.has(PermissionFlagsBits.Administrator)) {
-    return msg.reply("❌ هذا الأمر للمسؤولين فقط.");
-  }
+  if (!msg.member.permissions.has(PermissionFlagsBits.Administrator)) return;
 
   const sourceGuild = client.guilds.cache.get(SOURCE_ID);
   const targetGuild = client.guilds.cache.get(TARGET_ID);
 
-  if (!sourceGuild || !targetGuild) {
-    return msg.reply("❌ تأكد من وجود البوت في السيرفرين وصحة الـ IDs.");
-  }
+  if (!sourceGuild || !targetGuild) return msg.reply("❌ لم يتم العثور على السيرفرات.");
 
   try {
-    await msg.reply("⚠️ جاري تنظيف السيرفر الهدف بالكامل ثم البدء بالنسخ... يرجى الانتظار.");
+    await msg.reply("🚀 بدأت العملية: (1) التنظيف الشامل.. (2) نسخ الرتب.. (3) بناء الرومات..");
 
-    // --- المرحلة 1: تنظيف السيرفر الهدف (حذف القنوات والرتب) ---
-    console.log("🧹 جاري مسح محتويات السيرفر الهدف...");
-    
-    // حذف القنوات الحالية
+    // --- 1. تنظيف السيرفر الهدف بالكامل ---
+    console.log("🧹 تنظيف الرومات...");
     const targetChannels = await targetGuild.channels.fetch();
     for (const [id, channel] of targetChannels) {
-      await channel.delete().catch(() => {});
+      await channel.delete().catch(e => console.log(`فشل حذف قناة: ${channel.name}`));
+      await wait(500); // انتظر نصف ثانية بين كل حذف
     }
 
-    // حذف الرتب الحالية (باستثناء الرتب المحمية)
+    console.log("🧹 تنظيف الرتب...");
     const targetRoles = await targetGuild.roles.fetch();
     for (const [id, role] of targetRoles) {
-      if (role.managed || role.name === "@everyone") continue;
-      // لا يحذف رتبة البوت نفسه
-      if (role.id === targetGuild.members.me.roles.highest.id) continue;
-      await role.delete().catch(() => {});
+      // لا يمكن حذف رتبة @everyone أو رتبة البوت نفسه أو الرتب المدارة بواسطة بوتات أخرى
+      if (role.managed || role.name === "@everyone" || role.id === targetGuild.members.me.roles.highest.id) continue;
+      await role.delete().catch(e => console.log(`فشل حذف رتبة: ${role.name} (تأكد أن رتبة البوت فوقها)`));
+      await wait(500);
     }
 
-    // --- المرحلة 2: نسخ الرتب من المصدر ---
+    // --- 2. نسخ الرتب من المصدر ---
     const roleMap = new Map();
-    const sourceRoles = await sourceGuild.roles.fetch();
+    const sourceRoles = (await sourceGuild.roles.fetch()).sort((a, b) => b.position - a.position);
 
-    console.log("🎨 جاري إنشاء الرتب...");
+    console.log("🎨 إنشاء الرتب الجديدة...");
     for (const [id, role] of sourceRoles) {
       if (role.managed || role.name === "@everyone") continue;
-
+      
       const newRole = await targetGuild.roles.create({
         name: role.name,
         color: role.color,
         hoist: role.hoist,
         permissions: role.permissions,
-        mentionable: role.mentionable,
-        reason: "إعادة بناء السيرفر"
-      });
-      roleMap.set(role.name, newRole.id);
+        mentionable: role.mentionable
+      }).catch(e => console.log(`فشل إنشاء رتبة: ${role.name}`));
+      
+      if (newRole) roleMap.set(role.name, newRole.id);
+      await wait(500);
     }
 
-    // --- المرحلة 3: نسخ القنوات والفئات ---
+    // --- 3. نسخ القنوات والفئات ---
     const sourceChannels = await sourceGuild.channels.fetch();
-    
-    console.log("📁 جاري بناء القنوات...");
     const categories = sourceChannels
       .filter(c => c.type === ChannelType.GuildCategory)
       .sort((a, b) => a.position - b.position);
 
+    console.log("📁 بناء الهيكل...");
     for (const [id, category] of categories) {
       const newCategory = await targetGuild.channels.create({
         name: category.name,
@@ -98,23 +89,13 @@ client.on(Events.MessageCreate, async (msg) => {
         .sort((a, b) => a.position - b.position);
 
       for (const [childId, child] of children) {
-        // تجهيز صلاحيات الرومات بناءً على الرتب الجديدة
         const newOverwrites = child.permissionOverwrites.cache.map(overwrite => {
           const sourceRole = sourceGuild.roles.cache.get(overwrite.id);
           if (sourceRole && roleMap.has(sourceRole.name)) {
-            return {
-              id: roleMap.get(sourceRole.name),
-              allow: overwrite.allow,
-              deny: overwrite.deny
-            };
+            return { id: roleMap.get(sourceRole.name), allow: overwrite.allow, deny: overwrite.deny };
           }
-          // الحفاظ على صلاحية @everyone إذا وجدت
           if (overwrite.id === sourceGuild.id) {
-            return {
-              id: targetGuild.id,
-              allow: overwrite.allow,
-              deny: overwrite.deny
-            };
+            return { id: targetGuild.id, allow: overwrite.allow, deny: overwrite.deny };
           }
           return null;
         }).filter(Boolean);
@@ -126,15 +107,16 @@ client.on(Events.MessageCreate, async (msg) => {
           topic: child.topic,
           nsfw: child.nsfw,
           permissionOverwrites: newOverwrites
-        });
+        }).catch(e => console.log(`فشل إنشاء قناة: ${child.name}`));
+        await wait(500);
       }
     }
 
-    await msg.channel.send(`✅ تم تنظيف السيرفر بنجاح ونقل الهيكل من **${sourceGuild.name}** إلى **${targetGuild.name}**.`);
+    await msg.channel.send("✅ اكتملت العملية بنجاح تام!");
 
   } catch (error) {
-    console.error("حدث خطأ:", error);
-    await msg.reply("❌ حدث خطأ أثناء العملية. تأكد من أن رتبة البوت هي الأعلى في السيرفر الجديد.");
+    console.error(error);
+    await msg.reply("❌ حدث خطأ فني أثناء النسخ.");
   }
 });
 
