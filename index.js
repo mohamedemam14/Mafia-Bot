@@ -5,8 +5,7 @@ import {
   Events,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder
+  ButtonStyle
 } from "discord.js";
 import express from "express";
 import dotenv from "dotenv";
@@ -26,18 +25,13 @@ if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
 /* ================== الإعدادات (الأيديهات) ================== */
 
-const CHECK_ROOM_ID = "1457423689195978964"; // الروم الذي يفحص فيه النصوص المتكررة
-const ADMIN_LOG_CHANNEL_ID = "1459208046403391560"; // روم إرسال بلاغات التكرار
+const CHECK_ROOM_ID = "ضع_هنا_أيدي_روم_الفحص"; 
+const ADMIN_LOG_CHANNEL_ID = "1459162853696077982"; 
 
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 const NOTIFICATION_ROOM_ID = "1459162853696077982"; 
 
-const READY_RANK_2_ROOM_ID = "1459162819072102574";
-const READY_RANK_3_ROOM_ID = "1459162843327758525";
-const READY_COMBINED_ROOM_ID = "1459162779419414627";
-
-// غرف المهام
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
   "1459162799212200156": "الاستقبال",
@@ -56,8 +50,8 @@ const TASKS_RANK_3 = {
   "1459162832699392080": "CPR"
 };
 
-// ذاكرة تخزين النصوص المكررة
-const textCache = new Map();
+// ذاكرة تخزين الأسماء لمنع التكرار
+const nameCache = new Map();
 
 /* ================== دوال المساعدة ================== */
 
@@ -67,16 +61,6 @@ function loadProgress() {
 }
 function saveProgress(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-}
-
-function getNextUpgradeDay() {
-  const upgradeDays = [6, 2, 4]; 
-  const daysMap = { 0: "الأحد", 1: "الاثنين", 2: "الثلاثاء", 3: "الأربعاء", 4: "الخميس", 5: "الجمعة", 6: "السبت" };
-  const now = new Date();
-  const today = now.getDay();
-  let nextDay = upgradeDays.find(d => d >= today);
-  if (nextDay === undefined) nextDay = upgradeDays[0];
-  return daysMap[nextDay];
 }
 
 /* ================== تشغيل البوت ================== */
@@ -92,49 +76,48 @@ const client = new Client({
 });
 
 const app = express();
-app.get("/", (req, res) => res.send("Bot is Online"));
+app.get("/", (req, res) => res.send("Active"));
 app.listen(process.env.PORT || 3000);
 
-client.on(Events.ClientReady, () => console.log(`✅ ${client.user.tag} جاهز`));
+client.on(Events.ClientReady, () => console.log(`✅ ${client.user.tag} Online`));
 
 /* ================== معالجة الرسائل ================== */
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
-  // 1. نظام كشف تكرار "النص" في روم الفحص
+  // --- نظام كشف تكرار الاسم في روم الفحص ---
   if (message.channelId === CHECK_ROOM_ID) {
-    const msgContent = message.content.trim();
+    // البحث عن كلمة "الاسم:" وما بعدها
+    const nameMatch = message.content.match(/الاسم[:\s]+([^\n\r]+)/);
     
-    // الفحص يعمل فقط إذا كان هناك نص مرفق مع صورة
-    if (message.attachments.size > 0 && msgContent.length > 0) {
-      
-      if (textCache.has(msgContent)) {
-        const original = textCache.get(msgContent);
+    if (nameMatch && nameMatch[1]) {
+      const extractedName = nameMatch[1].trim(); // استخراج الاسم فقط
+
+      if (nameCache.has(extractedName)) {
+        const original = nameCache.get(extractedName);
         const adminLog = await client.channels.fetch(ADMIN_LOG_CHANNEL_ID).catch(() => null);
         
         if (adminLog) {
-          const alertEmbed = new EmbedBuilder()
-            .setTitle('🚨 اكتشاف بيانات مكررة!')
-            .setColor(0xFF0000)
-            .setDescription(`المستخدم <@${message.author.id}> أرسل نفس البيانات المكتوبة مسبقاً.`)
-            .addFields(
-              { name: 'البيانات المكررة', value: `\`\`\`${msgContent}\`\`\`` },
-              { name: 'الرسالة الأصلية', value: `[انتقل للأصل](${original.url})`, inline: true },
-              { name: 'الرسالة الحالية', value: `[انتقل للحالية](${message.url})`, inline: true }
-            )
-            .setTimestamp();
-          await adminLog.send({ embeds: [alertEmbed] });
+          // رسالة عادية بدون إمبيد كما طلبت
+          await adminLog.send(
+            `⚠️ **تنبيه تكرار بيانات!**\n` +
+            `👤 **المتدرب:** <@${message.author.id}>\n` +
+            `📝 **الاسم المكرر:** \`${extractedName}\`\n` +
+            `🔗 **التقرير الأصلي:** ${original.url}\n` +
+            `🛑 **التقرير الحالي:** ${message.url}\n` +
+            `━━━━━━━━━━━━━━━━━━━━`
+          );
         }
       } else {
-        // حفظ النص لأول مرة
-        textCache.set(msgContent, { url: message.url, author: message.author.id });
+        // حفظ الاسم الجديد في الذاكرة
+        nameCache.set(extractedName, { url: message.url, author: message.author.id });
       }
     }
     return;
   }
 
-  // 2. نظام المهام (في رومات المهام)
+  // --- نظام المهام المعتاد ---
   const isTaskRoom = TASKS_RANK_2[message.channelId] || TASKS_RANK_3[message.channelId];
   if (!isTaskRoom) return;
 
@@ -177,21 +160,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     data.completedRooms.push(roomId);
     data.tasks.push(TASKS_RANK_2[roomId] || TASKS_RANK_3[roomId]);
 
-    const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
     const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID);
+    const content = `### 📑 ملف المتابعة لـ <@${traineeId}>\nالتقدم: ${data.tasks.length}/6`;
     
-    const followMsgText = `### 📑 ملف المتابعة لـ <@${traineeId}>\nالتقدم: ${data.tasks.length}/${allTasks.length}`;
     if (data.followMessageId) {
        const m = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
-       if (m) await m.edit(followMsgText); else await followChannel.send(followMsgText).then(msg => data.followMessageId = msg.id);
+       if (m) await m.edit(content); else await followChannel.send(content).then(msg => data.followMessageId = msg.id);
     } else {
-       await followChannel.send(followMsgText).then(msg => data.followMessageId = msg.id);
-    }
-
-    if (data.tasks.length === allTasks.length && !data.upgradeNotified) {
-      data.upgradeNotified = true;
-      const nRoom = await client.channels.fetch(NOTIFICATION_ROOM_ID).catch(() => null);
-      if (nRoom) await nRoom.send(`تهانينا <@${traineeId}>! موعد الترقية: ${getNextUpgradeDay()}`);
+       await followChannel.send(content).then(msg => data.followMessageId = msg.id);
     }
 
     saveProgress(progress);
