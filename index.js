@@ -85,6 +85,15 @@ function saveProgress(data) {
   }
 }
 
+// دالة مخصصة لزيادة الإحصائيات لضمان عدم التصفير
+function incrementStat(channelId) {
+  const currentData = loadProgress();
+  if (!currentData.stats) currentData.stats = {};
+  currentData.stats[channelId] = (currentData.stats[channelId] || 0) + 1;
+  saveProgress(currentData);
+  return currentData.stats;
+}
+
 function getNextUpgradeDay() {
   const upgradeDays = [6, 2, 4]; 
   const daysMap = { 0: "الأحد", 1: "الاثنين", 2: "الثلاثاء", 3: "الأربعاء", 4: "الخميس", 5: "الجمعة", 6: "السبت" };
@@ -140,29 +149,21 @@ const client = new Client({
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  // السماح بالبوتات فقط في الرومات التلقائية (خاصة تعاون المقابلات)
-  if (message.author.bot && !AUTO_STATS_CHANNELS[message.channelId]) return;
-
-  // الإحصائيات التلقائية
+  // 1. معالجة الإحصائيات التلقائية (بما في ذلك البوتات)
   if (AUTO_STATS_CHANNELS[message.channelId]) {
-    const progress = loadProgress(); // تحميل أحدث نسخة من البيانات
-    if (!progress.stats) progress.stats = {};
-    
-    progress.stats[message.channelId] = (progress.stats[message.channelId] || 0) + 1;
-    
-    saveProgress(progress);
-    await updateStatsEmbed(client, progress.stats);
+    const updatedStats = incrementStat(message.channelId);
+    await updateStatsEmbed(client, updatedStats);
     return;
   }
 
-  // تجاهل الباقي إذا كان بوت
+  // 2. تجاهل أي بوت في الغرف الأخرى
   if (message.author.bot) return;
 
-  const progress = loadProgress();
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
   if (!rank && !isManual) return;
 
+  const progress = loadProgress();
   if (rank) {
     const userRankData = progress[message.author.id]?.[`rank${rank}`];
     if (userRankData?.completedRooms.includes(message.channelId)) {
@@ -193,15 +194,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const roomId = interaction.channelId;
 
   if (interaction.customId === 'approve_task') {
-    const progress = loadProgress();
-
+    // تحديث الإحصائيات اليدوية (مثل الكورسات والفعاليات) باستخدام الدالة الآمنة
     if (MANUAL_STATS_CHANNELS[roomId]) {
-      if (!progress.stats) progress.stats = {};
-      progress.stats[roomId] = (progress.stats[roomId] || 0) + 1;
-      await updateStatsEmbed(client, progress.stats);
+      const updatedStats = incrementStat(roomId);
+      await updateStatsEmbed(client, updatedStats);
     }
 
+    // تحميل البيانات لتحديث تقدم المتدرب
+    const progress = loadProgress();
     const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
+    
     if (rank) {
       const rankKey = `rank${rank}`;
       if (!progress[traineeId]) progress[traineeId] = {};
