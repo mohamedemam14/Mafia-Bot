@@ -78,18 +78,6 @@ function saveProgress(data) {
   catch (err) { console.error("Error saving data:", err); }
 }
 
-function getNextUpgradeDay() {
-  const upgradeDays = [6, 2, 4]; 
-  const daysMap = { 0: "الأحد", 1: "الاثنين", 2: "الثلاثاء", 3: "الأربعاء", 4: "الخميس", 5: "الجمعة", 6: "السبت" };
-  const now = new Date();
-  const today = now.getDay();
-  let nextDay = upgradeDays.find(d => d >= today);
-  if (nextDay === undefined) nextDay = upgradeDays[0];
-  return daysMap[nextDay];
-}
-
-/* ================== نماذج الرسائل ================== */
-
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
   const progressBar = "🔹".repeat(Math.round(percent/10)) + "🔸".repeat(10 - Math.round(percent/10));
@@ -98,27 +86,30 @@ function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
 }
 
 function buildPersonalNotification(userId, rank) {
-  const day = getNextUpgradeDay();
-  return `### 🔔 إشعار إتمام مرحلة التدريب (Rank ${rank})\n━━━━━━━━━━━━━━━━━━━━\nمرحباً بك <@${userId}>،\n\nلقد أتممت جميع المهام المطلوبة لرتبة **Rank ${rank}** بنجاح وأصبحت الآن **جاهزاً للترقية**.\n\n⚠️ أقرب موعد لك هو يوم **( ${day} )**\n⏰ من الساعة **10:00 مساءً** إلى **12:00 منتصف الليل**\n📍 بتوقيت مكة المكرمة.\n━━━━━━━━━━━━━━━━━━━━`;
+  return `### 🔔 إشعار إتمام مرحلة التدريب (Rank ${rank})\n━━━━━━━━━━━━━━━━━━━━\nمرحباً بك <@${userId}>،\n\nلقد أتممت جميع المهام المطلوبة لرتبة **Rank ${rank}** بنجاح وأصبحت الآن **جاهزاً للترقية**.\n\n⏰ يرجى التواجد في المواعيد الرسمية للترقيات.\n━━━━━━━━━━━━━━━━━━━━`;
 }
 
 function buildReadyToUpgradeMessage(userId, rank) {
   return `🎊 **تـهـنـئـة إتـمـام مـهـام** 🎊\n━━━━━━━━━━━━━━━━━━━━\n👤 **المتدرب:** <@${userId}>\n🏅 **الرتبة المنجزة:** \`Rank ${rank}\`\n✅ **الحالة:** جاهز للترقية رسمياً\n\n🔗 https://cdn.discordapp.com/attachments/1449506416065908816/1454546137439801354/1571650a7c706000-1.gif\n━━━━━━━━━━━━━━━━━━━━`;
 }
 
-async function updateStatsEmbed(client, statsData) {
+async function updateStatsEmbed(client, statsData, guild) {
   const statsChannel = await client.channels.fetch(STATS_ROOM_ID).catch(() => null);
   if (!statsChannel) return;
 
+  const serverIcon = guild.iconURL({ dynamic: true, size: 512 });
+
   const embed = new EmbedBuilder()
-    .setTitle("📈 لوحة مراقبة الأداء العام")
-    .setColor(0x00ffcc)
+    .setTitle("🌟 لوحة مراقبة الأداء العام")
+    .setColor(0x2f3136)
+    .setThumbnail(serverIcon)
+    .setImage("https://cdn.discordapp.com/attachments/1449506416065908816/1454546137439801354/1571650a7c706000-1.gif") // فاصل جمالي
     .addFields(
-      { name: "📋 التقارير المعتمدة", value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false },
-      { name: "🤝 إحصائيات التعاون", value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false }
+      { name: "📊 التقارير اليدوية المعتمدة", value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `> 🟢 **${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false },
+      { name: "🤝 إحصائيات التعاون التلقائي", value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `> 🔵 **${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false }
     )
     .setTimestamp()
-    .setFooter({ text: "تحديث تلقائي" });
+    .setFooter({ text: guild.name, iconURL: serverIcon });
 
   const messages = await statsChannel.messages.fetch({ limit: 10 });
   const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
@@ -133,16 +124,21 @@ const client = new Client({
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot) return;
+  // تم تعديل الشرط هنا ليحسب رسائل البوت فقط في غرف التعاون
+  if (message.author.bot && !AUTO_STATS_CHANNELS[message.channelId]) return;
+  
   const progress = loadProgress();
 
   if (AUTO_STATS_CHANNELS[message.channelId]) {
     if (!progress.stats) progress.stats = {};
     progress.stats[message.channelId] = (progress.stats[message.channelId] || 0) + 1;
     saveProgress(progress);
-    await updateStatsEmbed(client, progress.stats);
+    await updateStatsEmbed(client, progress.stats, message.guild);
     return;
   }
+
+  // إذا كانت الرسالة من بوت في غير غرف التعاون نخرج
+  if (message.author.bot) return;
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
@@ -183,7 +179,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (MANUAL_STATS_CHANNELS[roomId]) {
       if (!progress.stats) progress.stats = {};
       progress.stats[roomId] = (progress.stats[roomId] || 0) + 1;
-      await updateStatsEmbed(client, progress.stats);
+      await updateStatsEmbed(client, progress.stats, interaction.guild);
     }
 
     const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
@@ -210,15 +206,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         if (data.tasks.length === allTasks.length && !data.upgradeNotified) {
           data.upgradeNotified = true;
-          // إرسال لغرف الجاهزية (المنفصلة)
           const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
           if (rRoom) await rRoom.send(buildReadyToUpgradeMessage(traineeId, rank));
           
-          // إرسال الإشعار الشخصي
           const nRoom = await client.channels.fetch(NOTIFICATION_ROOM_ID).catch(() => null);
           if (nRoom) await nRoom.send(buildPersonalNotification(traineeId, rank));
           
-          // إرسال لغرفة الجاهزية المشتركة
           const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
           if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
         }
