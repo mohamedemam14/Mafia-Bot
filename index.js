@@ -69,13 +69,20 @@ const AUTO_STATS_CHANNELS = {
 /* ================== دوال المساعدة ================== */
 
 function loadProgress() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
-  catch (err) { return {}; }
+  try {
+    const data = fs.readFileSync(DATA_FILE, "utf8");
+    return JSON.parse(data);
+  } catch (err) {
+    return {};
+  }
 }
 
 function saveProgress(data) {
-  try { fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2)); }
-  catch (err) { console.error("Error saving data:", err); }
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error("Error saving data:", err);
+  }
 }
 
 function getNextUpgradeDay() {
@@ -133,23 +140,25 @@ const client = new Client({
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  // التعديل هنا: يسمح للبوتات فقط في الروم المخصص للإحصائيات التلقائية
-  if (message.author.bot && message.channelId !== "1459162779419414627") return;
+  // السماح بالبوتات فقط في الرومات التلقائية (خاصة تعاون المقابلات)
+  if (message.author.bot && !AUTO_STATS_CHANNELS[message.channelId]) return;
 
-  const progress = loadProgress();
-
-  // التحقق من غرف الإحصائيات التلقائية
+  // الإحصائيات التلقائية
   if (AUTO_STATS_CHANNELS[message.channelId]) {
+    const progress = loadProgress(); // تحميل أحدث نسخة من البيانات
     if (!progress.stats) progress.stats = {};
+    
     progress.stats[message.channelId] = (progress.stats[message.channelId] || 0) + 1;
+    
     saveProgress(progress);
     await updateStatsEmbed(client, progress.stats);
     return;
   }
 
-  // إذا كانت الرسالة من بوت في رومات غير إحصائية، نتوقف هنا
+  // تجاهل الباقي إذا كان بوت
   if (message.author.bot) return;
 
+  const progress = loadProgress();
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
   if (!rank && !isManual) return;
