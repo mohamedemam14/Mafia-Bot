@@ -28,7 +28,7 @@ if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 const STATS_ROOM_ID = "1459162751288217869"; 
-const TOP_WEEK_ROOM_ID = "1459162751288217869"; // يمكنك وضع ID روم مختلف هنا لتوب الأسبوع
+const TOP_WEEK_ROOM_ID = "1460017456662712637"; // يمكنك وضع ID روم مختلف هنا لتوب الأسبوع
 
 const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
