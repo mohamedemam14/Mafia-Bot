@@ -69,9 +69,8 @@ const AUTO_STATS_CHANNELS = {
 /* ================== دوال المساعدة ================== */
 
 function loadData() {
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  } catch (err) { return {}; }
+  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); }
+  catch (err) { return {}; }
 }
 
 function saveData(data) {
@@ -90,18 +89,9 @@ async function updateStatsEmbed(client, guild) {
     .setTitle("📊 إحصائيات الأداء العام")
     .setColor(0x2b2d31)
     .setThumbnail(serverIcon)
-    .setDescription("يتم تحديث الإحصائيات بشكل تراكمي وفوري.")
     .addFields(
-      { 
-        name: "📋 التقارير اليدوية المعتمدة", 
-        value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `> **${name}:** \`${stats[id] || 0}\``).join("\n"), 
-        inline: false 
-      },
-      { 
-        name: "🤝 تعاون الأقسام (تلقائي)", 
-        value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `> **${name}:** \`${stats[id] || 0}\``).join("\n"), 
-        inline: false 
-      }
+      { name: "📋 التقارير اليدوية المعتمدة", value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `> **${name}:** \`${stats[id] || 0}\``).join("\n"), inline: false },
+      { name: "🤝 تعاون الأقسام (تلقائي)", value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `> **${name}:** \`${stats[id] || 0}\``).join("\n"), inline: false }
     )
     .setTimestamp()
     .setFooter({ text: guild.name, iconURL: serverIcon });
@@ -130,7 +120,6 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
-  // تجاهل رسائل البوت في غرف المهام
   if (message.author.bot) return;
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
@@ -159,8 +148,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.customId === 'approve_task') {
     const data = loadData();
-
-    // تحديث يدوي للكورسات/الفعاليات
     if (MANUAL_STATS_CHANNELS[roomId]) {
       if (!data.stats) data.stats = {};
       data.stats[roomId] = (data.stats[roomId] || 0) + 1;
@@ -195,13 +182,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (userRank.tasks.length === Object.keys(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3).length && !userRank.upgradeNotified) {
           userRank.upgradeNotified = true;
           const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
-          if (rRoom) await rRoom.send(`🎊 المتدرب <@${traineeId}> جاهز لترقية **Rank ${rank}**`);
+          if (rRoom) await rRoom.send(`🎊 المتدرب <@${traineeId}> جاهز لترقية **Rank ${rank}**\n🔗 https://cdn.discordapp.com/attachments/1449506416065908816/1454546137439801354/1571650a7c706000-1.gif`);
           
           const nRoom = await client.channels.fetch(NOTIFICATION_ROOM_ID).catch(() => null);
-          if (nRoom) await nRoom.send(`### 🔔 إشعار إتمام التدريب\nمرحباً بك <@${traineeId}>، لقد أتممت جميع المهام لرتبة **Rank ${rank}**.\n⏰ يرجى التواجد في المواعيد الرسمية للترقيات.`);
-          
-          const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
-          if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
+          if (nRoom) await nRoom.send(`### 🔔 إشعار إتمام التدريب\nمرحباً بك <@${traineeId}>، لقد أتممت مهام **Rank ${rank}**.\n⏰ يرجى التواجد في المواعيد الرسمية للترقيات.`);
         }
       }
     }
@@ -209,10 +193,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     saveData(data);
     await updateStatsEmbed(client, interaction.guild);
     await originalMessage.react("✅");
-    await interaction.update({ content: "✅ تم الاعتماد", components: [] });
+    // حذف رسالة البوت (الأزرار) من الروم فور الاعتماد
+    await interaction.message.delete().catch(() => {});
   } else {
     await originalMessage.react(interaction.customId === 'missing_photo' ? "📷" : "❌");
-    await interaction.update({ content: "⚠️ تم التحديث", components: [] });
+    await interaction.message.delete().catch(() => {});
   }
 });
 
