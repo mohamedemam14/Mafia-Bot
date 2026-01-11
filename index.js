@@ -24,15 +24,19 @@ const DATA_FILE = path.join(DATA_DIR, "progress.json");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
-/* ================== الإعدادات (تأكد من صحة الـ IDs) ================== */
+/* ================== الإعدادات (IDs) ================== */
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 const STATS_ROOM_ID = "1459162751288217869"; 
-const TOP_WEEK_ROOM_ID = "1460017456662712637"; // يمكنك وضع ID روم مختلف هنا لتوب الأسبوع
+const TOP_WEEK_ROOM_ID = "1459162751288217869"; // روم توب الأسبوع
 
 const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
 const READY_COMBINED_ROOM_ID = "1459162779419414627";
+
+// رومات المهام (لتصنيف الكورسات والفعاليات في التوب)
+const COURSE_CHANNELS = ["1459162757135073323"]; 
+const EVENT_CHANNELS = ["1459162754173894801"];
 
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
@@ -66,8 +70,7 @@ const AUTO_STATS_CHANNELS = {
   "1459162794434891818": "تعاون قسم (Cpr)"
 };
 
-/* ================== نظام إدارة الملفات (المحسن) ================== */
-
+/* ================== نظام إدارة الملفات ================== */
 let isWriting = false;
 const queue = [];
 
@@ -75,22 +78,11 @@ async function processQueue() {
   if (isWriting || queue.length === 0) return;
   isWriting = true;
   const task = queue.shift();
-  try {
-    await task();
-  } catch (err) {
-    console.error("Queue Task Error:", err);
-  } finally {
-    isWriting = false;
-    processQueue();
-  }
+  try { await task(); } catch (err) { console.error(err); } finally { isWriting = false; processQueue(); }
 }
 
 function loadProgress() {
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } catch { return {}; }
 }
 
 async function safeIncrement(channelId) {
@@ -119,7 +111,7 @@ async function safeSaveUserProgress(traineeId, updateFn) {
   });
 }
 
-/* ================== دوال المساعدة للرسائل واللوحات ================== */
+/* ================== دوال المساعدة للرسائل ================== */
 
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
@@ -140,10 +132,11 @@ async function updateStatsEmbed(client, statsData) {
     .setTitle("📈 لوحة مراقبة الأداء العام")
     .setColor(0x00ffcc)
     .addFields(
-      { name: "📋 التقارير المعتمدة", value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n") || "لا توجد بيانات", inline: false },
-      { name: "🤝 إحصائيات التعاون", value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n") || "لا توجد بيانات", inline: false }
+      { name: "📋 التقارير المعتمدة", value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false },
+      { name: "🤝 إحصائيات التعاون", value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false }
     )
-    .setTimestamp();
+    .setTimestamp()
+    .setFooter({ text: "تحديث تلقائي وحماية من التصفير" });
 
   const messages = await statsChannel.messages.fetch({ limit: 15 });
   const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "📈 لوحة مراقبة الأداء العام");
@@ -160,32 +153,39 @@ async function updateTopWeekEmbed(client) {
 
   for (const [userId, userData] of Object.entries(data)) {
     if (userId === 'stats') continue;
-    const points = (userData.manualPoints || 0);
-    if (points > 0) leaderboard.push({ userId, points });
+    const courses = userData.courses || 0;
+    const events = userData.events || 0;
+    const total = courses + events;
+    if (total > 0) leaderboard.push({ userId, courses, events, total });
   }
 
-  leaderboard.sort((a, b) => b.points - a.points);
+  leaderboard.sort((a, b) => b.total - a.total);
 
   const embed = new EmbedBuilder()
-    .setTitle("👑 لوحة توب الأسبوع - نجوم القسم")
-    .setColor(0xFFD700)
+    .setTitle("🏆 قائمة النشاط والتميز")
+    .setColor(0xF1C40F)
     .setTimestamp();
 
   if (leaderboard.length === 0) {
-    embed.setDescription("ℹ️ لا توجد بيانات مسجلة لهذا الأسبوع حتى الآن.");
+    embed.setDescription("لا توجد بيانات مسجلة لهذا الأسبوع.");
   } else {
-    let listContent = "";
+    const topUser = leaderboard[0];
+    let description = `🌟 **نجم الأسبوع:** <@${topUser.userId}>\n` + "------------------\n\n";
+
     leaderboard.forEach((entry, index) => {
-      const rankIcon = index === 0 ? "🏆" : (index === 1 ? "🥈" : (index === 2 ? "🥉" : "🔹"));
-      const starPrefix = index === 0 ? "**[نجم الأسبوع المحتمل]**" : "";
-      listContent += `${rankIcon} ${starPrefix} <@${entry.userId}> — النقاط: \`${entry.points}\`\n`;
+      let rating = "جيد";
+      if (entry.total >= 15) rating = "💎 ممتاز";
+      else if (entry.total >= 8) rating = "✅ جيد جداً";
+
+      description += `${index + 1}. <@${entry.userId}>\n` +
+                     `┃ 📚 كورسـات: \`${entry.courses}\` | 🎯 فعاليات: \`${entry.events}\`\n` +
+                     `┃ التقييم: ${rating}\n\n`;
     });
-    embed.setDescription(listContent);
+    embed.setDescription(description);
   }
 
   const messages = await topChannel.messages.fetch({ limit: 15 });
-  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "👑 لوحة توب الأسبوع - نجوم القسم");
-  
+  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة النشاط والتميز");
   if (botMsg) await botMsg.edit({ embeds: [embed] });
   else await topChannel.send({ embeds: [embed] });
 }
@@ -199,7 +199,6 @@ const client = new Client({
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot && !AUTO_STATS_CHANNELS[message.channelId]) return;
 
-  // إحصائيات الأقسام (تلقائي)
   if (AUTO_STATS_CHANNELS[message.channelId]) {
     const updatedStats = await safeIncrement(message.channelId);
     await updateStatsEmbed(client, updatedStats);
@@ -208,22 +207,25 @@ client.on(Events.MessageCreate, async (message) => {
 
   if (message.author.bot) return;
 
-  // أمر تصفير النقاط للإدارة
+  // أمر التصفير (للقائمة واللوحة)
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
-    const data = loadProgress();
-    for (const key in data) {
-      if (data[key].manualPoints) data[key].manualPoints = 0;
-    }
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    await updateTopWeekEmbed(client);
-    return message.reply("✅ تم تصفير نقاط توب الأسبوع بنجاح.");
+    queue.push(async () => {
+      const data = loadProgress();
+      for (const key in data) {
+        if (key !== 'stats') { data[key].courses = 0; data[key].events = 0; }
+      }
+      fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+      message.reply("✅ تم تصفير بيانات النشاط بنجاح.");
+      await updateTopWeekEmbed(client);
+    });
+    processQueue();
+    return;
   }
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
   if (!rank && !isManual) return;
 
-  // منع التكرار في رومات الرتب
   if (rank) {
     const progress = loadProgress();
     const userRankData = progress[message.author.id]?.[`rank${rank}`];
@@ -255,18 +257,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const roomId = interaction.channelId;
 
   if (interaction.customId === 'approve_task') {
-    // 1. تحديث إحصائيات الكورسات/الفعاليات ونقاط التوب
+    // 1. تحديث الإحصائيات اليدوية وتوب الأسبوع
     if (MANUAL_STATS_CHANNELS[roomId]) {
       const updatedStats = await safeIncrement(roomId);
       await updateStatsEmbed(client, updatedStats);
       
       await safeSaveUserProgress(traineeId, async (userData) => {
-        userData.manualPoints = (userData.manualPoints || 0) + 1;
+        if (COURSE_CHANNELS.includes(roomId)) userData.courses = (userData.courses || 0) + 1;
+        if (EVENT_CHANNELS.includes(roomId)) userData.events = (userData.events || 0) + 1;
       });
       await updateTopWeekEmbed(client);
     }
 
-    // 2. تحديث ملفات تدريب الرتب
+    // 2. تحديث ملف تدريب الموظفين والترقيات
     await safeSaveUserProgress(traineeId, async (userData) => {
       const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
       if (!rank) return;
@@ -281,7 +284,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
         const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
-        
         if (followChannel) {
           const content = buildFollowMessage(traineeId, rank, data.tasks, allTasks);
           let existingMsg = null;
@@ -299,7 +301,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           data.upgradeNotified = true;
           const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
           if (rRoom) await rRoom.send(buildReadyToUpgradeMessage(traineeId, rank));
-          
           const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
           if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
         }
@@ -307,11 +308,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     });
 
     await originalMessage.react("✅");
-    await interaction.update({ content: "⭐ تم الاعتماد وتحديث التوب.", components: [] });
+    await interaction.update({ content: "⭐ تم الاعتماد وتحديث القوائم.", components: [] });
     setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
   } else {
     await originalMessage.react(interaction.customId === 'missing_photo' ? "📷" : "❌");
-    await interaction.update({ content: "⚠️ تم التحديث بنجاح.", components: [] });
+    await interaction.update({ content: "⚠️ تم التحديث.", components: [] });
     setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
   }
 });
