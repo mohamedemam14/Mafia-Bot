@@ -27,7 +27,6 @@ if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 /* ================== الإعدادات (IDs) ================== */
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
-const NOTIFICATION_ROOM_ID = "1459162853696077982";
 const STATS_ROOM_ID = "1459162751288217869"; 
 
 const READY_RANK_2_ROOM_ID = "1459162819072102574";
@@ -93,7 +92,6 @@ function loadProgress() {
   }
 }
 
-// دالة زيادة إحصائيات آمنة (تمنع التصفير)
 async function safeIncrement(channelId) {
   return new Promise((resolve) => {
     queue.push(async () => {
@@ -107,13 +105,12 @@ async function safeIncrement(channelId) {
   });
 }
 
-// دالة حفظ بيانات المتدربين آمنة
 async function safeSaveUserProgress(traineeId, updateFn) {
   return new Promise((resolve) => {
     queue.push(async () => {
       const data = loadProgress();
       if (!data[traineeId]) data[traineeId] = {};
-      updateFn(data[traineeId]);
+      await updateFn(data[traineeId]);
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       resolve(data);
     });
@@ -123,26 +120,11 @@ async function safeSaveUserProgress(traineeId, updateFn) {
 
 /* ================== دوال المساعدة للرسائل ================== */
 
-function getNextUpgradeDay() {
-  const upgradeDays = [6, 2, 4]; 
-  const daysMap = { 0: "الأحد", 1: "الاثنين", 2: "الثلاثاء", 3: "الأربعاء", 4: "الخميس", 5: "الجمعة", 6: "السبت" };
-  const now = new Date();
-  const today = now.getDay();
-  let nextDay = upgradeDays.find(d => d >= today);
-  if (nextDay === undefined) nextDay = upgradeDays[0];
-  return daysMap[nextDay];
-}
-
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
   const progressBar = "🔹".repeat(Math.round(percent/10)) + "🔸".repeat(10 - Math.round(percent/10));
   const list = totalTasks.map(t => doneTasks.includes(t) ? `┃ ✅ **${t}**` : `┃ 🔘 *${t}*`).join("\n");
   return `### 📑 مـلف تـدريب المـوظفين (Rank ${rank})\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة المستهدفة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم:**\n┃ ${progressBar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`) من المتطلبات.`;
-}
-
-function buildPersonalNotification(userId, rank) {
-  const day = getNextUpgradeDay();
-  return `### 🔔 إشعار إتمام مرحلة التدريب (Rank ${rank})\n━━━━━━━━━━━━━━━━━━━━\nمرحباً بك <@${userId}>،\n\nلقد أتممت جميع المهام المطلوبة لرتبة **Rank ${rank}** بنجاح وأصبحت الآن **جاهزاً للترقية**.\n\n⚠️ أقرب موعد لك هو يوم **( ${day} )**\n⏰ من الساعة **10:00 مساءً** إلى **12:00 منتصف الليل**\n📍 بتوقيت مكة المكرمة.\n━━━━━━━━━━━━━━━━━━━━`;
 }
 
 function buildReadyToUpgradeMessage(userId, rank) {
@@ -176,10 +158,8 @@ const client = new Client({
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  // السماح بالبوتات فقط في الرومات التلقائية
   if (message.author.bot && !AUTO_STATS_CHANNELS[message.channelId]) return;
 
-  // إحصائيات تلقائية (مع حماية الطابور)
   if (AUTO_STATS_CHANNELS[message.channelId]) {
     const updatedStats = await safeIncrement(message.channelId);
     await updateStatsEmbed(client, updatedStats);
@@ -192,7 +172,6 @@ client.on(Events.MessageCreate, async (message) => {
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
   if (!rank && !isManual) return;
 
-  // فحص سريع للتكرار قبل إظهار الأزرار
   if (rank) {
     const progress = loadProgress();
     const userRankData = progress[message.author.id]?.[`rank${rank}`];
@@ -224,13 +203,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const roomId = interaction.channelId;
 
   if (interaction.customId === 'approve_task') {
-    // 1. تحديث الإحصائيات اليدوية (إذا كانت كورس/فعالية)
     if (MANUAL_STATS_CHANNELS[roomId]) {
       const updatedStats = await safeIncrement(roomId);
       await updateStatsEmbed(client, updatedStats);
     }
 
-    // 2. تحديث تقدم المتدرب (بشكل آمن في الطابور)
     await safeSaveUserProgress(traineeId, async (userData) => {
       const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
       if (!rank) return;
@@ -243,16 +220,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
         data.completedRooms.push(roomId);
         data.tasks.push(rank === 2 ? TASKS_RANK_2[roomId] : TASKS_RANK_3[roomId]);
 
-        // تحديث رسالة المتابعة
+        // تحديث رسالة المتابعة (تعديل الرسالة الحالية)
         const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
         const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
         if (followChannel) {
           const content = buildFollowMessage(traineeId, rank, data.tasks, allTasks);
+          let existingMsg = null;
           if (data.followMessageId) {
-            const oldMsg = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
-            if (oldMsg) await oldMsg.edit({ content });
-            else { const nm = await followChannel.send({ content }); data.followMessageId = nm.id; }
-          } else { const nm = await followChannel.send({ content }); data.followMessageId = nm.id; }
+            existingMsg = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
+          }
+
+          if (existingMsg) {
+            await existingMsg.edit({ content });
+          } else {
+            const newMsg = await followChannel.send({ content });
+            data.followMessageId = newMsg.id;
+          }
         }
 
         // إشعارات الجاهزية
@@ -260,9 +243,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           data.upgradeNotified = true;
           const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
           if (rRoom) await rRoom.send(buildReadyToUpgradeMessage(traineeId, rank));
-          
-          const nRoom = await client.channels.fetch(NOTIFICATION_ROOM_ID).catch(() => null);
-          if (nRoom) await nRoom.send(buildPersonalNotification(traineeId, rank));
           
           const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
           if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
@@ -281,6 +261,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 const app = express();
-app.get("/", (req, res) => res.send("Bot Online - Anti-Reset Mode ✅"));
+app.get("/", (req, res) => res.send("Bot Online - Follow Fix ✅"));
 app.listen(process.env.PORT || 3000);
 client.login(process.env.TOKEN);
