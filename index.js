@@ -28,7 +28,7 @@ if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 const STATS_ROOM_ID = "1459162751288217869"; 
-const TOP_WEEK_ROOM_ID = "1459162751288217869"; 
+const TOP_WEEK_ROOM_ID = "1460017456662712637"; // تأكد من صحة ID روم التوب
 
 const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
@@ -69,7 +69,7 @@ const AUTO_STATS_CHANNELS = {
   "1459162794434891818": "تعاون قسم (Cpr)"
 };
 
-/* ================== إدارة البيانات ================== */
+/* ================== إدارة البيانات (Queue System) ================== */
 let isWriting = false;
 const queue = [];
 
@@ -101,7 +101,7 @@ async function safeSaveUserProgress(traineeId, updateFn) {
   return new Promise((resolve) => {
     queue.push(async () => {
       const data = loadProgress();
-      if (!data[traineeId]) data[traineeId] = { courses: 0, events: 0, collab: 0 };
+      if (!data[traineeId]) data[traineeId] = { courses: 0, events: 0, collab: 0, manualPoints: 0 };
       await updateFn(data[traineeId]);
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       resolve(data);
@@ -130,7 +130,7 @@ async function updateStatsEmbed(client, statsData) {
       { name: "📋 التقارير المعتمدة", value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n") || "0", inline: false },
       { name: "🤝 إحصائيات التعاون", value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n") || "0", inline: false }
     ).setTimestamp();
-  const msgs = await statsChannel.messages.fetch({ limit: 20 });
+  const msgs = await statsChannel.messages.fetch({ limit: 15 });
   const botMsg = msgs.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "📈 لوحة مراقبة الأداء العام");
   if (botMsg) await botMsg.edit({ embeds: [embed] }); else await statsChannel.send({ embeds: [embed] });
 }
@@ -138,51 +138,64 @@ async function updateStatsEmbed(client, statsData) {
 async function updateTopWeekEmbed(client) {
   const topChannel = await client.channels.fetch(TOP_WEEK_ROOM_ID).catch(() => null);
   if (!topChannel) return;
+
   const data = loadProgress();
   const leaderboard = [];
+
   for (const [userId, userData] of Object.entries(data)) {
     if (userId === 'stats') continue;
     const total = (userData.courses || 0) + (userData.events || 0) + (userData.collab || 0);
-    if (total > 0) leaderboard.push({ userId, courses: userData.courses || 0, events: userData.events || 0, collab: userData.collab || 0, total });
+    if (total > 0) leaderboard.push({ userId, ...userData, total });
   }
+
   leaderboard.sort((a, b) => b.total - a.total);
 
-  const embed = new EmbedBuilder().setTitle("🏆 قائمة النشاط والتميز").setColor(0xF1C40F).setTimestamp();
-  if (leaderboard.length === 0) { embed.setDescription("لا توجد بيانات مسجلة."); } else {
-    const guild = await client.guilds.fetch(topChannel.guildId);
-    const topEntry = leaderboard[0];
-    const topMember = await guild.members.fetch(topEntry.userId).catch(() => null);
-    const topName = topMember ? topMember.displayName : "عضو غير معروف";
+  const embed = new EmbedBuilder()
+    .setTitle("🏆 قائمة النشاط والتميز الأسبوعي")
+    .setColor(0xF1C40F)
+    .setThumbnail("https://cdn-icons-png.flaticon.com/512/3112/3112946.png")
+    .setFooter({ text: "يتم التحديث تلقائياً عند اعتماد المهام" })
+    .setTimestamp();
 
-    let desc = `🌟 **نجم الأسبوع المحتمل:** \`${topName}\`\n------------------\n\n`;
+  if (leaderboard.length === 0) {
+    embed.setDescription("ℹ️ لا توجد بيانات مسجلة لهذا الأسبوع حتى الآن.");
+  } else {
+    let desc = "";
+    const topThree = ["🥇", "🥈", "🥉"];
+    
     for (let i = 0; i < Math.min(leaderboard.length, 10); i++) {
       const e = leaderboard[i];
-      const m = await guild.members.fetch(e.userId).catch(() => null);
-      const name = m ? m.displayName : "عضو غير معروف";
-      const rating = e.total >= 15 ? "💎 ممتاز" : (e.total >= 8 ? "✅ جيد جداً" : "جيد");
-      desc += `${i + 1}. **${name}**\n┃ 📚 كورسـات: \`${e.courses}\` | 🎯 فعاليات: \`${e.events}\` | 🤝 تعاون: \`${e.collab}\`\n┃ التقييم: ${rating}\n\n`;
+      const rankIcon = topThree[i] || "🔹";
+      const rating = e.total >= 15 ? "💎 ممتاز" : (e.total >= 8 ? "✅ جيد جداً" : "✨ جيد");
+      
+      desc += `${rankIcon} <@${e.userId}>\n`;
+      desc += `┃ 📚 الكورسات: \`${e.courses || 0}\` | 🎯 الفعاليات: \`${e.events || 0}\`\n`;
+      desc += `┃ 🤝 التعاون: \`${e.collab || 0}\` | 📊 التقييم: ${rating}\n\n`;
     }
     embed.setDescription(desc);
+    
+    if (leaderboard.length > 0) {
+        embed.addFields({ name: "🌟 نجم الأسبوع الحالي", value: `⭐ <@${leaderboard[0].userId}> بمجموع نقاط \`${leaderboard[0].total}\`` });
+    }
   }
-  const msgs = await topChannel.messages.fetch({ limit: 20 });
-  const botMsg = msgs.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة النشاط والتميز");
+
+  const msgs = await topChannel.messages.fetch({ limit: 15 });
+  const botMsg = msgs.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة النشاط والتميز الأسبوعي");
   if (botMsg) await botMsg.edit({ embeds: [embed] }); else await topChannel.send({ embeds: [embed] });
 }
 
-/* ================== الأحداث ================== */
+/* ================== الأحداث (Events) ================== */
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
   partials: [Partials.Message, Partials.Channel]
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  // 1. حساب التعاون التلقائي (AUTO) - يتم احتسابه بمجرد إرسال البوت في الغرف المحددة
+  // 1. حساب التعاون التلقائي (AUTO) وربطه بالتوب
   if (message.author.bot && AUTO_STATS_CHANNELS[message.channelId]) {
-    // تحديث لوحة الإحصائيات العامة (تعاون الأقسام)
     const updatedStats = await safeIncrementStats(message.channelId);
     await updateStatsEmbed(client, updatedStats);
 
-    // محاولة ربط التعاون بالعضو لزيادة نقاطه في التوب (إذا وجد منشن في الرسالة)
     const mentionedUser = message.mentions.users.first();
     if (mentionedUser) {
         await safeSaveUserProgress(mentionedUser.id, async (userData) => {
@@ -192,26 +205,42 @@ client.on(Events.MessageCreate, async (message) => {
     }
     return;
   }
-
   if (message.author.bot) return;
 
-  // 2. أمر التصفير
+  // 2. أمر التصفير (Reset)
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
     queue.push(async () => {
       const data = loadProgress();
-      for (const k in data) { if (k !== 'stats') { data[k].courses = 0; data[k].events = 0; data[k].collab = 0; } }
+      for (const k in data) { 
+        if (k !== 'stats') { 
+            data[k].courses = 0; 
+            data[k].events = 0; 
+            data[k].collab = 0; 
+            data[k].manualPoints = 0;
+        } 
+      }
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-      message.reply("✅ تم تصفير بيانات النشاط.");
       await updateTopWeekEmbed(client);
+      message.reply("✅ تم تصفير قائمة التوب بنجاح.");
     });
     processQueue();
     return;
   }
 
-  // 3. إدارة رومات المهام والتقارير اليدوية
+  // 3. إدارة رومات المهام والاعتماد اليدوي
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
   if (!rank && !isManual) return;
+
+  // منع التكرار في رومات الرتب
+  if (rank) {
+    const progress = loadProgress();
+    if (progress[message.author.id]?.[`rank${rank}`]?.completedRooms.includes(message.channelId)) {
+        const warning = await message.reply("⛔ لقد أرسلت في هذه الغرفة سابقاً.");
+        setTimeout(() => { message.delete().catch(() => {}); warning.delete().catch(() => {}); }, 3000);
+        return;
+    }
+  }
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('approve_task').setLabel('قبول ✅').setStyle(ButtonStyle.Success),
@@ -233,7 +262,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const roomId = interaction.channelId;
 
   if (interaction.customId === 'approve_task') {
-    // تحديث التوب اليدوي (كورسات/فعاليات)
+    // تحديث الإحصائيات اليدوية ونقاط التوب
     if (MANUAL_STATS_CHANNELS[roomId]) {
       const updatedStats = await safeIncrementStats(roomId);
       await updateStatsEmbed(client, updatedStats);
@@ -244,10 +273,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await updateTopWeekEmbed(client);
     }
 
-    // تحديث ملف التدريب والترقيات
+    // تحديث ملف التدريب
     await safeSaveUserProgress(traineeId, async (userData) => {
       const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
       if (!rank) return;
+      
       const rankKey = `rank${rank}`;
       if (!userData[rankKey]) userData[rankKey] = { tasks: [], completedRooms: [], followMessageId: null, upgradeNotified: false };
       const data = userData[rankKey];
@@ -258,32 +288,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
         
         const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
         const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
+        
         if (followChannel) {
           const content = buildFollowMessage(traineeId, rank, data.tasks, allTasks);
           let exMsg = null;
           if (data.followMessageId) exMsg = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
-          if (exMsg) await exMsg.edit({ content }); else { const n = await followChannel.send({ content }); data.followMessageId = n.id; }
+          if (exMsg) await exMsg.edit({ content }); 
+          else { const n = await followChannel.send({ content }); data.followMessageId = n.id; }
         }
 
         if (data.tasks.length === allTasks.length && !data.upgradeNotified) {
           data.upgradeNotified = true;
           const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
           if (rRoom) await rRoom.send(buildReadyToUpgradeMessage(traineeId, rank));
+          
           const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
           if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
         }
       }
     });
     await originalMessage.react("✅");
-    await interaction.update({ content: "⭐ تم الاعتماد.", components: [] });
+    await interaction.update({ content: "⭐ تم الاعتماد وتحديث التوب.", components: [] });
   } else {
     await originalMessage.react(interaction.customId === 'missing_photo' ? "📷" : "❌");
-    await interaction.update({ content: "⚠️ تم التحديث.", components: [] });
+    await interaction.update({ content: "⚠️ تم التحديث بنجاح.", components: [] });
   }
   setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
 });
 
+/* ================== تشغيل السيرفر والبوت ================== */
 const app = express();
-app.get("/", (req, res) => res.send("Bot Online"));
+app.get("/", (req, res) => res.send("Bot Online ✅"));
 app.listen(process.env.PORT || 3000);
+
 client.login(process.env.TOKEN);
