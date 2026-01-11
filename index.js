@@ -28,6 +28,7 @@ if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 const STATS_ROOM_ID = "1459162751288217869"; 
+const TOP_WEEK_ROOM_ID = "1459162751288217869"; // روم توب الأسبوع (يمكن أن يكون نفس STATS_ROOM أو غيره)
 
 const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
@@ -118,7 +119,7 @@ async function safeSaveUserProgress(traineeId, updateFn) {
   });
 }
 
-/* ================== دوال المساعدة للرسائل ================== */
+/* ================== دوال المساعدة للرسائل واللوحات ================== */
 
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
@@ -146,9 +147,47 @@ async function updateStatsEmbed(client, statsData) {
     .setFooter({ text: "تحديث تلقائي وحماية من التصفير" });
 
   const messages = await statsChannel.messages.fetch({ limit: 10 });
-  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
+  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes("الأداء العام"));
   if (botMsg) await botMsg.edit({ embeds: [embed] });
   else await statsChannel.send({ embeds: [embed] });
+}
+
+async function updateTopWeekEmbed(client) {
+  const topChannel = await client.channels.fetch(TOP_WEEK_ROOM_ID).catch(() => null);
+  if (!topChannel) return;
+
+  const data = loadProgress();
+  const leaderboard = [];
+
+  for (const [userId, userData] of Object.entries(data)) {
+    if (userId === 'stats') continue;
+    const points = (userData.manualPoints || 0);
+    if (points > 0) leaderboard.push({ userId, points });
+  }
+
+  leaderboard.sort((a, b) => b.points - a.points);
+
+  const embed = new EmbedBuilder()
+    .setTitle("👑 لوحة توب الأسبوع - نجوم القسم")
+    .setColor(0xFFD700)
+    .setDescription(leaderboard.length === 0 ? "لا توجد بيانات متاحة لهذا الأسبوع." : "")
+    .setTimestamp();
+
+  if (leaderboard.length > 0) {
+    let listContent = "";
+    leaderboard.forEach((entry, index) => {
+      const rankIcon = index === 0 ? "🏆" : (index === 1 ? "🥈" : (index === 2 ? "🥉" : "🔹"));
+      const starPrefix = index === 0 ? "**[نجم الأسبوع المحتمل]**" : "";
+      listContent += `${rankIcon} ${starPrefix} <@${entry.userId}> — النقاط: \`${entry.points}\`\n`;
+    });
+    embed.setDescription(listContent);
+  }
+
+  const messages = await topChannel.messages.fetch({ limit: 10 });
+  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes("توب الأسبوع"));
+  
+  if (botMsg) await botMsg.edit({ embeds: [embed] });
+  else await topChannel.send({ embeds: [embed] });
 }
 
 /* ================== الأحداث ================== */
@@ -203,11 +242,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const roomId = interaction.channelId;
 
   if (interaction.customId === 'approve_task') {
+    // تحديث الإحصائيات العامة + نظام توب الأسبوع
     if (MANUAL_STATS_CHANNELS[roomId]) {
       const updatedStats = await safeIncrement(roomId);
       await updateStatsEmbed(client, updatedStats);
+      
+      await safeSaveUserProgress(traineeId, async (userData) => {
+        userData.manualPoints = (userData.manualPoints || 0) + 1;
+      });
+      await updateTopWeekEmbed(client);
     }
 
+    // تحديث ملف التدريب والترقيات
     await safeSaveUserProgress(traineeId, async (userData) => {
       const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
       if (!rank) return;
@@ -220,7 +266,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         data.completedRooms.push(roomId);
         data.tasks.push(rank === 2 ? TASKS_RANK_2[roomId] : TASKS_RANK_3[roomId]);
 
-        // تحديث رسالة المتابعة (تعديل الرسالة الحالية)
         const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
         const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
         if (followChannel) {
@@ -238,7 +283,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
         }
 
-        // إشعارات الجاهزية
         if (data.tasks.length === allTasks.length && !data.upgradeNotified) {
           data.upgradeNotified = true;
           const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
@@ -261,6 +305,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 const app = express();
-app.get("/", (req, res) => res.send("Bot Online - Follow Fix ✅"));
+app.get("/", (req, res) => res.send("Bot Online - Star of the Week Active ✅"));
 app.listen(process.env.PORT || 3000);
 client.login(process.env.TOKEN);
