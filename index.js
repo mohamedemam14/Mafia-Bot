@@ -88,11 +88,22 @@ function getNextUpgradeDay() {
   return daysMap[nextDay];
 }
 
+/* ================== نماذج الرسائل ================== */
+
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
   const progressBar = "🔹".repeat(Math.round(percent/10)) + "🔸".repeat(10 - Math.round(percent/10));
   const list = totalTasks.map(t => doneTasks.includes(t) ? `┃ ✅ **${t}**` : `┃ 🔘 *${t}*`).join("\n");
   return `### 📑 مـلف تـدريب المـوظفين (Rank ${rank})\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة المستهدفة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم:**\n┃ ${progressBar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`) من المتطلبات.`;
+}
+
+function buildPersonalNotification(userId, rank) {
+  const day = getNextUpgradeDay();
+  return `### 🔔 إشعار إتمام مرحلة التدريب (Rank ${rank})\n━━━━━━━━━━━━━━━━━━━━\nمرحباً بك <@${userId}>،\n\nلقد أتممت جميع المهام المطلوبة لرتبة **Rank ${rank}** بنجاح وأصبحت الآن **جاهزاً للترقية**.\n\n⚠️ أقرب موعد لك هو يوم **( ${day} )**\n⏰ من الساعة **10:00 مساءً** إلى **12:00 منتصف الليل**\n📍 بتوقيت مكة المكرمة.\n━━━━━━━━━━━━━━━━━━━━`;
+}
+
+function buildReadyToUpgradeMessage(userId, rank) {
+  return `🎊 **تـهـنـئـة إتـمـام مـهـام** 🎊\n━━━━━━━━━━━━━━━━━━━━\n👤 **المتدرب:** <@${userId}>\n🏅 **الرتبة المنجزة:** \`Rank ${rank}\`\n✅ **الحالة:** جاهز للترقية رسمياً\n\n🔗 https://cdn.discordapp.com/attachments/1449506416065908816/1454546137439801354/1571650a7c706000-1.gif\n━━━━━━━━━━━━━━━━━━━━`;
 }
 
 async function updateStatsEmbed(client, statsData) {
@@ -102,22 +113,20 @@ async function updateStatsEmbed(client, statsData) {
   const embed = new EmbedBuilder()
     .setTitle("📈 لوحة مراقبة الأداء العام")
     .setColor(0x00ffcc)
-    .setThumbnail(client.user.displayAvatarURL())
     .addFields(
       { name: "📋 التقارير المعتمدة", value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false },
       { name: "🤝 إحصائيات التعاون", value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false }
     )
     .setTimestamp()
-    .setFooter({ text: "تحديث تلقائي وفوري للبيانات" });
+    .setFooter({ text: "تحديث تلقائي" });
 
-  const messages = await statsChannel.messages.fetch({ limit: 15 });
+  const messages = await statsChannel.messages.fetch({ limit: 10 });
   const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
-  
   if (botMsg) await botMsg.edit({ embeds: [embed] });
   else await statsChannel.send({ embeds: [embed] });
 }
 
-/* ================== أحداث البوت ================== */
+/* ================== الأحداث ================== */
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
   partials: [Partials.Message, Partials.Channel]
@@ -142,7 +151,7 @@ client.on(Events.MessageCreate, async (message) => {
   if (rank) {
     const userRankData = progress[message.author.id]?.[`rank${rank}`];
     if (userRankData?.completedRooms.includes(message.channelId)) {
-      const warning = await message.reply(`⛔ مكرر.`);
+      const warning = await message.reply(`⛔ لقد أنهيت هذه المهمة مسبقاً.`);
       setTimeout(() => { message.delete().catch(() => {}); warning.delete().catch(() => {}); }, 3000);
       return;
     }
@@ -163,13 +172,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!member.roles.cache.has(ADMIN_ROLE_ID)) return interaction.reply({ content: "صلاحيات إدارية فقط.", ephemeral: true });
 
   const originalMessage = await interaction.channel.messages.fetch(interaction.message.reference.messageId).catch(() => null);
-  if (!originalMessage) return interaction.reply({ content: "خطأ.", ephemeral: true });
+  if (!originalMessage) return interaction.reply({ content: "خطأ في الرسالة الأصلية.", ephemeral: true });
 
   const traineeId = originalMessage.author.id;
   const roomId = interaction.channelId;
 
   if (interaction.customId === 'approve_task') {
     const progress = loadProgress();
+
     if (MANUAL_STATS_CHANNELS[roomId]) {
       if (!progress.stats) progress.stats = {};
       progress.stats[roomId] = (progress.stats[roomId] || 0) + 1;
@@ -181,10 +191,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const rankKey = `rank${rank}`;
       if (!progress[traineeId]) progress[traineeId] = {};
       if (!progress[traineeId][rankKey]) progress[traineeId][rankKey] = { tasks: [], completedRooms: [], followMessageId: null, upgradeNotified: false };
+      
       const data = progress[traineeId][rankKey];
       if (!data.completedRooms.includes(roomId)) {
         data.completedRooms.push(roomId);
         data.tasks.push(rank === 2 ? TASKS_RANK_2[roomId] : TASKS_RANK_3[roomId]);
+
         const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
         const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
         if (followChannel) {
@@ -195,16 +207,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
             else { const nm = await followChannel.send({ content }); data.followMessageId = nm.id; }
           } else { const nm = await followChannel.send({ content }); data.followMessageId = nm.id; }
         }
+
         if (data.tasks.length === allTasks.length && !data.upgradeNotified) {
           data.upgradeNotified = true;
+          // إرسال لغرف الجاهزية (المنفصلة)
           const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
-          if (rRoom) await rRoom.send(`🎊 **تهنئة <@${traineeId}> جاهز للترقية لرتبة ${rank}**`);
+          if (rRoom) await rRoom.send(buildReadyToUpgradeMessage(traineeId, rank));
+          
+          // إرسال الإشعار الشخصي
+          const nRoom = await client.channels.fetch(NOTIFICATION_ROOM_ID).catch(() => null);
+          if (nRoom) await nRoom.send(buildPersonalNotification(traineeId, rank));
+          
+          // إرسال لغرفة الجاهزية المشتركة
+          const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
+          if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
         }
       }
     }
     saveProgress(progress);
     await originalMessage.react("✅");
-    await interaction.update({ content: "⭐ تم.", components: [] });
+    await interaction.update({ content: "⭐ تم الاعتماد.", components: [] });
     setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
   } else {
     await originalMessage.react(interaction.customId === 'missing_photo' ? "📷" : "❌");
