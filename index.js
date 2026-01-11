@@ -102,17 +102,17 @@ async function updateStatsEmbed(client, statsData, guild) {
   const embed = new EmbedBuilder()
     .setTitle("🌟 لوحة مراقبة الأداء العام")
     .setColor(0x2f3136)
-    .setThumbnail(serverIcon)
-    .setImage("https://cdn.discordapp.com/attachments/1449506416065908816/1454546137439801354/1571650a7c706000-1.gif") // فاصل جمالي
+    .setThumbnail(serverIcon) // تم ترك صورة السيرفر الصغيرة (Thumbnail) وحذف الكبيرة
     .addFields(
       { name: "📊 التقارير اليدوية المعتمدة", value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `> 🟢 **${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false },
       { name: "🤝 إحصائيات التعاون التلقائي", value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `> 🔵 **${name}:** \`${statsData[id] || 0}\``).join("\n"), inline: false }
     )
     .setTimestamp()
-    .setFooter({ text: guild.name, iconURL: serverIcon });
+    .setFooter({ text: `آخر تحديث في سـيرفر ${guild.name}`, iconURL: serverIcon });
 
   const messages = await statsChannel.messages.fetch({ limit: 10 });
   const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
+  
   if (botMsg) await botMsg.edit({ embeds: [embed] });
   else await statsChannel.send({ embeds: [embed] });
 }
@@ -124,11 +124,13 @@ const client = new Client({
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  // تم تعديل الشرط هنا ليحسب رسائل البوت فقط في غرف التعاون
-  if (message.author.bot && !AUTO_STATS_CHANNELS[message.channelId]) return;
-  
+  // السماح بحساب رسائل البوت فقط إذا كانت في رومات التعاون
+  const isBotInAutoRoom = message.author.bot && AUTO_STATS_CHANNELS[message.channelId];
+  if (message.author.bot && !isBotInAutoRoom) return;
+
   const progress = loadProgress();
 
+  // نظام التعاون التلقائي (يحسب رسائل الكل بما فيهم البوت)
   if (AUTO_STATS_CHANNELS[message.channelId]) {
     if (!progress.stats) progress.stats = {};
     progress.stats[message.channelId] = (progress.stats[message.channelId] || 0) + 1;
@@ -137,7 +139,7 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
-  // إذا كانت الرسالة من بوت في غير غرف التعاون نخرج
+  // إذا كانت الرسالة من بوت في رومات المهام نخرج
   if (message.author.bot) return;
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
@@ -145,8 +147,8 @@ client.on(Events.MessageCreate, async (message) => {
   if (!rank && !isManual) return;
 
   if (rank) {
-    const userRankData = progress[message.author.id]?.[`rank${rank}`];
-    if (userRankData?.completedRooms.includes(message.channelId)) {
+    const userRankKey = `rank${rank}`;
+    if (progress[message.author.id]?.[userRankKey]?.completedRooms.includes(message.channelId)) {
       const warning = await message.reply(`⛔ لقد أنهيت هذه المهمة مسبقاً.`);
       setTimeout(() => { message.delete().catch(() => {}); warning.delete().catch(() => {}); }, 3000);
       return;
@@ -195,6 +197,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const allTasks = Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3);
         const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
+        
         if (followChannel) {
           const content = buildFollowMessage(traineeId, rank, data.tasks, allTasks);
           if (data.followMessageId) {
