@@ -109,6 +109,11 @@ async function safeSaveUserProgress(traineeId, updateFn) {
       if (!data[traineeId]) {
         data[traineeId] = { courses: 0, events: 0, manualPoints: 0 };
       }
+      // تأكد من وجود القيم لتجنب NaN
+      data[traineeId].courses = data[traineeId].courses || 0;
+      data[traineeId].events = data[traineeId].events || 0;
+      data[traineeId].manualPoints = data[traineeId].manualPoints || 0;
+
       await updateFn(data[traineeId]);
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       resolve(data);
@@ -276,11 +281,14 @@ client.on(Events.MessageCreate, async (message) => {
 
   // أوامر الإضافة اليدوية (كورسات / فعاليات)
   if ((message.content.startsWith("!addcourse") || message.content.startsWith("!addevent")) && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
-    const args = message.content.split(" ");
+    const args = message.content.trim().split(/\s+/);
     const targetMember = message.mentions.members.first();
-    const amount = parseInt(args[2]) || 1;
-
+    
     if (!targetMember) return message.reply("❌ يرجى منشن العضو. مثال: `!addcourse @user 5` ");
+
+    // تحديد مكان العدد: إذا كان المنشن هو الأول، العدد يكون في args[2]، وإذا كان المنشن الأخير، نأخذ آخر عنصر
+    let amountStr = args.find(arg => !isNaN(arg) && !arg.includes("<@"));
+    const amount = parseInt(amountStr) || 1;
 
     const isCourse = message.content.startsWith("!addcourse");
     const channelId = isCourse ? COURSES_CHANNEL_ID : EVENTS_CHANNEL_ID;
@@ -288,8 +296,11 @@ client.on(Events.MessageCreate, async (message) => {
     // تحديث نقاط العضو
     await safeSaveUserProgress(targetMember.id, async (userData) => {
       userData.manualPoints = (userData.manualPoints || 0) + amount;
-      if (isCourse) userData.courses = (userData.courses || 0) + amount;
-      else userData.events = (userData.events || 0) + amount;
+      if (isCourse) {
+        userData.courses = (userData.courses || 0) + amount;
+      } else {
+        userData.events = (userData.events || 0) + amount;
+      }
     });
 
     // تحديث الإحصائيات العامة
@@ -444,13 +455,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.isModalSubmit()) {
     const parts = interaction.customId.split('_');
-    const msgId = parts[3]; 
+    const actionType = parts[1]; // reject_task or missing_photo
+    const msgId = parts[2]; 
     
     const reason = interaction.fields.getTextInputValue('reason_text');
     const originalMessage = await interaction.channel.messages.fetch(msgId).catch(() => null);
 
     if (originalMessage) {
-      const isReject = interaction.customId.includes('reject_task');
+      const isReject = actionType === 'reject_task';
       const emoji = isReject ? "❌" : "📷";
       const statusText = isReject ? "رفض التقرير" : "وجود نقص في التقرير";
       
@@ -469,7 +481,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 /* ================== تشغيل السيرفر والبوت ================== */
 const app = express();
-const port = process.env.PORT || 3000; // تأكد من استخدام المتغير PORT
+const port = process.env.PORT || 3000;
 
 app.get("/", (req, res) => res.send("Bot Stats Online ✅"));
 
