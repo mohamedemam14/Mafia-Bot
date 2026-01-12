@@ -469,7 +469,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 /* ================== تشغيل السيرفر والبوت ================== */
 const app = express();
+const port = process.env.PORT || 3000; // تأكد من استخدام المتغير PORT
+
 app.get("/", (req, res) => res.send("Bot Stats Online ✅"));
-app.listen(process.env.PORT || 3000);
+
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Server is running on port ${port}`);
+});
 
 client.login(process.env.TOKEN);
