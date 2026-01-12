@@ -227,15 +227,12 @@ client.on(Events.ClientReady, () => {
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot && message.channelId !== FOLLOW_ROOM_ID) return;
+  if (message.author.bot) return;
 
   if (message.channelId === READY_COMBINED_ROOM_ID) {
     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
     await updateStatsEmbed(client, stats);
-    if (message.author.bot) return;
   }
-
-  if (message.author.bot) return;
 
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
     const data = loadProgress();
@@ -253,28 +250,27 @@ client.on(Events.MessageCreate, async (message) => {
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
-  
-  // إذا كانت الرسالة في أي من الرومات الـ 14 المطلوبة
-  if (rank || isManual) {
-    // إرسال رابط الخط فوراً بعد رسالة المتدرب
-    await message.channel.send(LINE_URL).catch(() => {});
+  if (!rank && !isManual) return;
 
-    // فحص إذا كان المتدرب قد أنهى المهمة مسبقاً (فقط لغرف الـ 12)
-    if (rank) {
-      const progress = loadProgress();
-      if (progress[message.author.id]?.[`rank${rank}`]?.completedRooms?.includes(message.channelId)) {
-        return message.delete().catch(() => {});
-      }
+  // إرسال الخط فوراً بعد رسالة المتدرب
+  const lineMsg = await message.channel.send(LINE_URL).catch(() => null);
+
+  if (rank) {
+    const progress = loadProgress();
+    if (progress[message.author.id]?.[`rank${rank}`]?.completedRooms?.includes(message.channelId)) {
+      // إذا المهمة مكررة، نحذف رسالة الخط ورسالة الشخص
+      if (lineMsg) await lineMsg.delete().catch(() => {});
+      return message.delete().catch(() => {});
     }
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('approve_task').setLabel('قبول ✅').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('missing_photo').setLabel('نقص 📷').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('reject_task').setLabel('رفض ❌').setStyle(ButtonStyle.Danger)
-    );
-
-    await message.reply({ content: `🛠️ **تحكم الإدارة لتقرير:** <@${message.author.id}>`, components: [row] });
   }
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('approve_task').setLabel('قبول ✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('missing_photo').setLabel('نقص 📷').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('reject_task').setLabel('رفض ❌').setStyle(ButtonStyle.Danger)
+  );
+
+  await message.reply({ content: `🛠️ **تحكم الإدارة لتقرير:** <@${message.author.id}>`, components: [row] });
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -323,12 +319,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
               const m = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
               if (m) {
                 await m.edit({ content });
-                await followChannel.send(LINE_URL).catch(() => {}); // إرسال الخط بعد تحديث الملف في المتابعة
+                await followChannel.send(LINE_URL).catch(() => {}); // إرسال خط في روم المتابعة
               }
             } else {
               const nm = await followChannel.send({ content });
               data.followMessageId = nm.id;
-              await followChannel.send(LINE_URL).catch(() => {}); // إرسال الخط بعد إرسال الملف الجديد
+              await followChannel.send(LINE_URL).catch(() => {}); // إرسال خط في روم المتابعة
             }
           }
 
@@ -382,6 +378,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     await interaction.reply({ content: "✅ تم تسجيل السبب بنجاح.", ephemeral: true });
+    
     const controlMsg = await interaction.channel.messages.fetch(interaction.message.id).catch(() => null);
     if (controlMsg) await controlMsg.delete().catch(() => {});
   }
