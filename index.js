@@ -34,6 +34,9 @@ const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
 const READY_COMBINED_ROOM_ID = "1459162779419414627"; 
 
+const COURSES_CHANNEL_ID = "1459162757135073323";
+const EVENTS_CHANNEL_ID = "1459162754173894801";
+
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
   "1459162799212200156": "الاستقبال",
@@ -53,8 +56,8 @@ const TASKS_RANK_3 = {
 };
 
 const MANUAL_STATS_CHANNELS = {
-  "1459162757135073323": "📚 عدد الكورسات",
-  "1459162754173894801": "🎉 عدد الفعاليات"
+  [COURSES_CHANNEL_ID]: "📚 عدد الكورسات",
+  [EVENTS_CHANNEL_ID]: "🎉 عدد الفعاليات"
 };
 
 /* ================== نظام إدارة الملفات ================== */
@@ -89,7 +92,7 @@ async function safeSaveUserProgress(traineeId, updateFn) {
   return new Promise((resolve) => {
     queue.push(async () => {
       const data = loadProgress();
-      if (!data[traineeId]) data[traineeId] = {};
+      if (!data[traineeId]) data[traineeId] = { courses: 0, events: 0, manualPoints: 0 };
       await updateFn(data[traineeId]);
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       resolve(data);
@@ -104,10 +107,7 @@ async function updateStatsEmbed(client, statsData) {
   const statsChannel = await client.channels.fetch(STATS_ROOM_ID).catch(() => null);
   if (!statsChannel || !statsData) return;
 
-  // حساب المجموع الكلي للكورسات والفعاليات
-  const totalReports = Object.keys(MANUAL_STATS_CHANNELS).reduce((acc, id) => {
-    return acc + (statsData[id] || 0);
-  }, 0);
+  const totalReports = Object.keys(MANUAL_STATS_CHANNELS).reduce((acc, id) => acc + (statsData[id] || 0), 0);
 
   const embed = new EmbedBuilder()
     .setTitle("📊 مركز إحصائيات الأداء العام")
@@ -150,42 +150,62 @@ function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   return `### 📑 مـلف تـدريب المـوظفين (Rank ${rank})\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم الإجمالي:**\n┃ ${progressBar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`)`;
 }
 
+// دالة حساب النجوم بناءً على المجموع
+function getStars(total) {
+  if (total >= 20) return "⭐⭐⭐⭐⭐⭐⭐+";
+  if (total >= 15) return "⭐⭐⭐⭐⭐⭐⭐";
+  if (total >= 10) return "⭐⭐⭐⭐⭐";
+  if (total >= 5)  return "⭐⭐⭐";
+  if (total >= 2)  return "⭐⭐";
+  return "🌑";
+}
+
 async function updateTopWeekEmbed(client) {
   const topChannel = await client.channels.fetch(TOP_WEEK_ROOM_ID).catch(() => null);
   if (!topChannel) return;
 
   const data = loadProgress();
+  const guild = topChannel.guild;
+
+  // استخراج وترتيب المستخدمين بناءً على المجموع الكلي (manualPoints)
   const leaderboard = Object.entries(data)
-    .filter(([id, val]) => id !== 'stats' && val.manualPoints > 0)
-    .sort((a, b) => b[1].manualPoints - a[1].manualPoints);
+    .filter(([id, val]) => id !== 'stats' && (val.manualPoints || 0) > 0)
+    .sort((a, b) => (b[1].manualPoints || 0) - (a[1].manualPoints || 0));
 
   const embed = new EmbedBuilder()
-    .setTitle("👑 قائمة فرسان الأسبوع")
+    .setTitle("🏆 قائمة فرسان الأسبوع المتميزين")
+    .setDescription("يتم تحديث الترتيب بناءً على مجموع الكورسات والفعاليات المعتمدة.")
     .setColor(0xFFAA00)
+    .setThumbnail("https://i.imgur.com/u7766pS.png") // رابط أيقونة كأس اختياري
+    .setFooter({ text: "نظام التقييم الأسبوعي • تحديث تلقائي", iconURL: client.user.displayAvatarURL() })
     .setTimestamp();
 
   if (leaderboard.length === 0) {
-    embed.setDescription("⚠️ لا توجد نقاط مسجلة حالياً.");
+    embed.setDescription("⚠️ لا توجد نقاط مسجلة حالياً في هذه الفترة.");
   } else {
-    let content = leaderboard.map((entry, i) => {
-      const icon = i === 0 ? "🥇" : (i === 1 ? "🥈" : (i === 2 ? "🥉" : "🔹"));
-      return `${icon} <@${entry[0]}> — **${entry[1].manualPoints}** نقطة`;
-    }).join("\n");
-    embed.setDescription(content);
+    const lines = await Promise.all(leaderboard.slice(0, 15).map(async ([userId, val], i) => {
+      const member = await guild.members.fetch(userId).catch(() => null);
+      const name = member ? member.displayName : "مستخدم غير معروف";
+      const rankIcon = i === 0 ? "🥇" : (i === 1 ? "🥈" : (i === 2 ? "🥉" : "🔹"));
+      
+      const courses = val.courses || 0;
+      const events = val.events || 0;
+      const total = val.manualPoints || 0;
+      const stars = getStars(total);
+
+      return `${rankIcon} **${name}**\n> 📚 الكورسات: \`${courses}\` | 🎉 الفعاليات: \`${events}\`\n> 💎 المجموع: **${total}** | التقييم: ${stars}\n──────────────────`;
+    }));
+    
+    embed.setDescription(lines.join("\n"));
   }
 
   const messages = await topChannel.messages.fetch({ limit: 10 });
-  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "👑 قائمة فرسان الأسبوع");
+  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة فرسان الأسبوع المتميزين");
   if (botMsg) await botMsg.edit({ embeds: [embed] });
   else await topChannel.send({ embeds: [embed] });
 }
 
 /* ================== الأحداث ================== */
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
-  partials: [Partials.Message, Partials.Channel]
-});
-
 client.on(Events.MessageCreate, async (message) => {
   if (message.channelId === READY_COMBINED_ROOM_ID) {
     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
@@ -197,10 +217,16 @@ client.on(Events.MessageCreate, async (message) => {
 
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
     const data = loadProgress();
-    for (const key in data) if (data[key]?.manualPoints) data[key].manualPoints = 0;
+    for (const key in data) {
+      if (data[key]?.manualPoints !== undefined) {
+        data[key].manualPoints = 0;
+        data[key].courses = 0;
+        data[key].events = 0;
+      }
+    }
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
     await updateTopWeekEmbed(client);
-    return message.reply("✅ تم تصفير النقاط الأسبوعية.");
+    return message.reply("✅ تم تصفير جميع النقاط والإحصائيات الأسبوعية.");
   }
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
@@ -238,7 +264,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (MANUAL_STATS_CHANNELS[roomId]) {
       const stats = await safeIncrement(roomId);
       await updateStatsEmbed(client, stats);
-      await safeSaveUserProgress(traineeId, async (u) => { u.manualPoints = (u.manualPoints || 0) + 1; });
+      
+      await safeSaveUserProgress(traineeId, async (u) => { 
+        u.manualPoints = (u.manualPoints || 0) + 1;
+        if (roomId === COURSES_CHANNEL_ID) u.courses = (u.courses || 0) + 1;
+        if (roomId === EVENTS_CHANNEL_ID) u.events = (u.events || 0) + 1;
+      });
+      
       await updateTopWeekEmbed(client);
     }
 
@@ -254,7 +286,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         data.completedRooms.push(roomId);
         data.tasks.push(rank === 2 ? TASKS_RANK_2[roomId] : TASKS_RANK_3[roomId]);
 
-        const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
+        const followChannel = await client.channels.fetch(FOLLOW_ROLE_ID).catch(() => null);
         if (followChannel) {
           const content = buildFollowMessage(traineeId, rank, data.tasks, Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3));
           if (data.followMessageId) {
@@ -284,6 +316,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await interaction.update({ content: "⚠️ تم تسجيل الملاحظة.", components: [] });
   }
   setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
+});
+
+const client_init = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
+  partials: [Partials.Message, Partials.Channel]
 });
 
 const app = express();
