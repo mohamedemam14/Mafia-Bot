@@ -86,20 +86,15 @@ async function processQueue() {
 }
 
 function loadProgress() {
-  try {
-    const content = fs.readFileSync(DATA_FILE, "utf8");
-    return JSON.parse(content);
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } catch { return {}; }
 }
 
-async function safeIncrement(channelId, amount = 1) {
+async function safeIncrement(channelId) {
   return new Promise((resolve) => {
     queue.push(async () => {
       const data = loadProgress();
       if (!data.stats) data.stats = {};
-      data.stats[channelId] = (data.stats[channelId] || 0) + amount;
+      data.stats[channelId] = (data.stats[channelId] || 0) + 1;
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       resolve(data.stats);
     });
@@ -158,8 +153,8 @@ async function updateStatsEmbed(client, statsData) {
     .setFooter({ text: "نظام إدارة الإحصائيات التلقائي", iconURL: client.user.displayAvatarURL() })
     .setTimestamp();
 
-  const messages = await statsChannel.messages.fetch({ limit: 10 }).catch(() => []);
-  const botMsg = Array.isArray(messages) ? messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "📊 مركز إحصائيات الأداء العام") : null;
+  const messages = await statsChannel.messages.fetch({ limit: 10 });
+  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "📊 مركز إحصائيات الأداء العام");
   
   if (botMsg) await botMsg.edit({ embeds: [embed] });
   else await statsChannel.send({ embeds: [embed] });
@@ -220,8 +215,8 @@ async function updateTopWeekEmbed(client) {
     embed.setDescription(lines.join("\n"));
   }
 
-  const messages = await topChannel.messages.fetch({ limit: 10 }).catch(() => []);
-  const botMsg = Array.isArray(messages) ? messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة فرسان الأسبوع المتميزين") : null;
+  const messages = await topChannel.messages.fetch({ limit: 10 });
+  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة فرسان الأسبوع المتميزين");
   if (botMsg) await botMsg.edit({ embeds: [embed] });
   else await topChannel.send({ embeds: [embed] });
 }
@@ -244,18 +239,19 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot) {
-    if (message.channelId === READY_COMBINED_ROOM_ID) {
-      const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
-      await updateStatsEmbed(client, stats);
-    }
-    return;
+  if (message.channelId === READY_COMBINED_ROOM_ID) {
+    const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
+    await updateStatsEmbed(client, stats);
+    if (message.author.bot) return;
   }
+
+  if (message.author.bot) return;
 
   // امر التصفير الشامل
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
     queue.push(async () => {
       const data = loadProgress();
+      // تصفير نقاط المستخدمين
       for (const key in data) {
         if (key !== 'stats') {
           data[key].manualPoints = 0;
@@ -263,6 +259,7 @@ client.on(Events.MessageCreate, async (message) => {
           data[key].events = 0;
         }
       }
+      // تصفير إحصائيات الأداء العام بالكامل
       data.stats = {
         newMembersCount: 0,
         [READY_COMBINED_ROOM_ID]: 0,
@@ -277,33 +274,6 @@ client.on(Events.MessageCreate, async (message) => {
     });
     processQueue();
     return;
-  }
-
-  // إصلاح أوامر الإضافة اليدوية (كورسات / فعاليات)
-  if ((message.content.startsWith("!addcourse") || message.content.startsWith("!addevent")) && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
-    const args = message.content.split(/\s+/);
-    const targetMember = message.mentions.members.first();
-
-    if (!targetMember) return message.reply("❌ يرجى منشن العضو. مثال: `!addcourse @user 5` ");
-
-    // البحث عن الرقم في الرسالة
-    const amountArg = args.find(a => /^\d+$/.test(a));
-    const amount = amountArg ? parseInt(amountArg) : 1;
-
-    const isCourse = message.content.startsWith("!addcourse");
-    const channelId = isCourse ? COURSES_CHANNEL_ID : EVENTS_CHANNEL_ID;
-
-    await safeSaveUserProgress(targetMember.id, async (userData) => {
-      userData.manualPoints = (userData.manualPoints || 0) + amount;
-      if (isCourse) userData.courses = (userData.courses || 0) + amount;
-      else userData.events = (userData.events || 0) + amount;
-    });
-
-    const stats = await safeIncrement(channelId, amount);
-    await updateStatsEmbed(client, stats);
-    await updateTopWeekEmbed(client);
-
-    return message.reply(`✅ تم إضافة **${amount}** ${isCourse ? "كورس" : "فعالية"} لـ <@${targetMember.id}> وتحديث الإحصائيات.`);
   }
 
   // أوامر إنهاء المهام السريعة
@@ -324,6 +294,7 @@ client.on(Events.MessageCreate, async (message) => {
         upgradeNotified: true
       };
 
+      // تحديث ملف المتابعة
       const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
       if (followChannel) {
         const content = buildFollowMessage(targetMember.id, rank, userData[rankKey].tasks, Object.values(tasksConfig));
@@ -336,6 +307,7 @@ client.on(Events.MessageCreate, async (message) => {
         }
       }
 
+      // إرسال إشعارات الجاهزية
       const rRoom = await client.channels.fetch(readyChannelId).catch(() => null);
       if (rRoom) await rRoom.send({ content: `🎊 **تهنئة إتمام مهام (بأمر إداري)** 🎊\n<@${targetMember.id}> جاهز لترقية Rank ${rank}` });
       
@@ -475,12 +447,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 /* ================== تشغيل السيرفر والبوت ================== */
 const app = express();
-const port = process.env.PORT || 3000;
-
 app.get("/", (req, res) => res.send("Bot Stats Online ✅"));
-
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Server is running on port ${port}`);
-});
+app.listen(process.env.PORT || 3000);
 
 client.login(process.env.TOKEN);
