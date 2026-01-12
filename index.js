@@ -24,11 +24,11 @@ const DATA_FILE = path.join(DATA_DIR, "progress.json");
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
-/* ================== الإعدادات (تأكد من صحة الـ IDs) ================== */
+/* ================== الإعدادات ================== */
 const ADMIN_ROLE_ID = "1459164560480145576";
 const FOLLOW_ROOM_ID = "1459162738503847969";
 const STATS_ROOM_ID = "1459162751288217869"; 
-const TOP_WEEK_ROOM_ID = "1460017456662712637"; // يمكنك وضع ID روم مختلف هنا لتوب الأسبوع
+const TOP_WEEK_ROOM_ID = "1460017456662712637";
 
 const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
@@ -52,21 +52,13 @@ const TASKS_RANK_3 = {
   "1459162832699392080": "CPR"
 };
 
+// تم الإبقاء فقط على الكورسات والفعاليات
 const MANUAL_STATS_CHANNELS = {
   "1459162757135073323": "عدد الكورسات",
   "1459162754173894801": "عدد الفعاليات"
 };
 
-const AUTO_STATS_CHANNELS = {
-  "1459162779419414627": "تعاون قسم المقابلات",
-  "1459162782397104243": "تعاون قسم المخالفات",
-  "1459162785018675304": "تعاون قسم الفعاليات",
-  "1459162788151951522": "تعاون قسم الارشاد",
-  "1459162790798295067": "تعاون قسم الاعلام",
-  "1459162794434891818": "تعاون قسم (Cpr)"
-};
-
-/* ================== نظام إدارة الملفات (المحسن) ================== */
+/* ================== نظام إدارة الملفات ================== */
 
 let isWriting = false;
 const queue = [];
@@ -119,7 +111,7 @@ async function safeSaveUserProgress(traineeId, updateFn) {
   });
 }
 
-/* ================== دوال المساعدة للرسائل واللوحات ================== */
+/* ================== دوال المساعدة ================== */
 
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
@@ -140,8 +132,13 @@ async function updateStatsEmbed(client, statsData) {
     .setTitle("📈 لوحة مراقبة الأداء العام")
     .setColor(0x00ffcc)
     .addFields(
-      { name: "📋 التقارير المعتمدة", value: Object.entries(MANUAL_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n") || "لا توجد بيانات", inline: false },
-      { name: "🤝 إحصائيات التعاون", value: Object.entries(AUTO_STATS_CHANNELS).map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``).join("\n") || "لا توجد بيانات", inline: false }
+      { 
+        name: "📋 التقارير المعتمدة", 
+        value: Object.entries(MANUAL_STATS_CHANNELS)
+          .map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``)
+          .join("\n") || "لا توجد بيانات", 
+        inline: false 
+      }
     )
     .setTimestamp();
 
@@ -197,22 +194,13 @@ const client = new Client({
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot && !AUTO_STATS_CHANNELS[message.channelId]) return;
-
-  // إحصائيات الأقسام (تلقائي)
-  if (AUTO_STATS_CHANNELS[message.channelId]) {
-    const updatedStats = await safeIncrement(message.channelId);
-    await updateStatsEmbed(client, updatedStats);
-    return;
-  }
-
   if (message.author.bot) return;
 
-  // أمر تصفير النقاط للإدارة
+  // أمر تصفير النقاط
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
     const data = loadProgress();
     for (const key in data) {
-      if (data[key].manualPoints) data[key].manualPoints = 0;
+      if (data[key] && data[key].manualPoints) data[key].manualPoints = 0;
     }
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
     await updateTopWeekEmbed(client);
@@ -223,7 +211,7 @@ client.on(Events.MessageCreate, async (message) => {
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
   if (!rank && !isManual) return;
 
-  // منع التكرار في رومات الرتب
+  // منع التكرار لرومات الرتب فقط
   if (rank) {
     const progress = loadProgress();
     const userRankData = progress[message.author.id]?.[`rank${rank}`];
@@ -255,7 +243,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const roomId = interaction.channelId;
 
   if (interaction.customId === 'approve_task') {
-    // 1. تحديث إحصائيات الكورسات/الفعاليات ونقاط التوب
+    // تحديث إحصائيات الكورسات/الفعاليات ونقاط التوب
     if (MANUAL_STATS_CHANNELS[roomId]) {
       const updatedStats = await safeIncrement(roomId);
       await updateStatsEmbed(client, updatedStats);
@@ -266,7 +254,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await updateTopWeekEmbed(client);
     }
 
-    // 2. تحديث ملفات تدريب الرتب
+    // تحديث ملفات تدريب الرتب
     await safeSaveUserProgress(traineeId, async (userData) => {
       const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
       if (!rank) return;
