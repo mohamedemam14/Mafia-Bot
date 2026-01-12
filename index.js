@@ -6,7 +6,10 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder
+  EmbedBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
 } from "discord.js";
 import express from "express";
 import dotenv from "dotenv";
@@ -265,74 +268,112 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
-  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-  if (!member || !member.roles.cache.has(ADMIN_ROLE_ID)) {
-    return interaction.reply({ content: "صلاحيات إدارية فقط.", ephemeral: true });
-  }
-
-  const originalMessage = await interaction.channel.messages.fetch(interaction.message.reference.messageId).catch(() => null);
-  if (!originalMessage) return interaction.reply({ content: "الرسالة الأصلية مفقودة.", ephemeral: true });
-
-  const traineeId = originalMessage.author.id;
-  const roomId = interaction.channelId;
-
-  if (interaction.customId === 'approve_task') {
-    if (MANUAL_STATS_CHANNELS[roomId]) {
-      const stats = await safeIncrement(roomId);
-      await updateStatsEmbed(client, stats);
-      
-      await safeSaveUserProgress(traineeId, async (u) => { 
-        u.manualPoints = (u.manualPoints || 0) + 1;
-        if (roomId === COURSES_CHANNEL_ID) u.courses = (u.courses || 0) + 1;
-        if (roomId === EVENTS_CHANNEL_ID) u.events = (u.events || 0) + 1;
-      });
-      
-      await updateTopWeekEmbed(client);
+  // التعامل مع الأزرار
+  if (interaction.isButton()) {
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!member || !member.roles.cache.has(ADMIN_ROLE_ID)) {
+      return interaction.reply({ content: "صلاحيات إدارية فقط.", ephemeral: true });
     }
 
-    await safeSaveUserProgress(traineeId, async (userData) => {
-      const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
-      if (!rank) return;
+    const originalMessage = await interaction.channel.messages.fetch(interaction.message.reference.messageId).catch(() => null);
+    if (!originalMessage) return interaction.reply({ content: "الرسالة الأصلية مفقودة.", ephemeral: true });
 
-      const rankKey = `rank${rank}`;
-      if (!userData[rankKey]) userData[rankKey] = { tasks: [], completedRooms: [], followMessageId: null, upgradeNotified: false };
-      
-      const data = userData[rankKey];
-      if (!data.completedRooms.includes(roomId)) {
-        data.completedRooms.push(roomId);
-        data.tasks.push(rank === 2 ? TASKS_RANK_2[roomId] : TASKS_RANK_3[roomId]);
+    const traineeId = originalMessage.author.id;
+    const roomId = interaction.channelId;
 
-        const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
-        if (followChannel) {
-          const content = buildFollowMessage(traineeId, rank, data.tasks, Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3));
-          if (data.followMessageId) {
-            const m = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
-            if (m) await m.edit({ content });
-          } else {
-            const nm = await followChannel.send({ content });
-            data.followMessageId = nm.id;
+    if (interaction.customId === 'approve_task') {
+      if (MANUAL_STATS_CHANNELS[roomId]) {
+        const stats = await safeIncrement(roomId);
+        await updateStatsEmbed(client, stats);
+        
+        await safeSaveUserProgress(traineeId, async (u) => { 
+          u.manualPoints = (u.manualPoints || 0) + 1;
+          if (roomId === COURSES_CHANNEL_ID) u.courses = (u.courses || 0) + 1;
+          if (roomId === EVENTS_CHANNEL_ID) u.events = (u.events || 0) + 1;
+        });
+        
+        await updateTopWeekEmbed(client);
+      }
+
+      await safeSaveUserProgress(traineeId, async (userData) => {
+        const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
+        if (!rank) return;
+
+        const rankKey = `rank${rank}`;
+        if (!userData[rankKey]) userData[rankKey] = { tasks: [], completedRooms: [], followMessageId: null, upgradeNotified: false };
+        
+        const data = userData[rankKey];
+        if (!data.completedRooms.includes(roomId)) {
+          data.completedRooms.push(roomId);
+          data.tasks.push(rank === 2 ? TASKS_RANK_2[roomId] : TASKS_RANK_3[roomId]);
+
+          const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
+          if (followChannel) {
+            const content = buildFollowMessage(traineeId, rank, data.tasks, Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3));
+            if (data.followMessageId) {
+              const m = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
+              if (m) await m.edit({ content });
+            } else {
+              const nm = await followChannel.send({ content });
+              data.followMessageId = nm.id;
+            }
+          }
+
+          if (data.tasks.length === Object.keys(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3).length && !data.upgradeNotified) {
+            data.upgradeNotified = true;
+            const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
+            if (rRoom) await rRoom.send({ content: `🎊 **تهنئة إتمام مهام** 🎊\n<@${traineeId}> جاهز لترقية Rank ${rank}` });
+            
+            const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
+            if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
           }
         }
+      });
 
-        if (data.tasks.length === Object.keys(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3).length && !data.upgradeNotified) {
-          data.upgradeNotified = true;
-          const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
-          if (rRoom) await rRoom.send({ content: `🎊 **تهنئة إتمام مهام** 🎊\n<@${traineeId}> جاهز لترقية Rank ${rank}` });
-          
-          const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
-          if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
-        }
-      }
-    });
+      await originalMessage.react("✅");
+      await interaction.update({ content: "✅ تم الاعتماد وتحديث البيانات.", components: [] });
+      setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
+    } 
+    
+    // التعامل مع أزرار الرفض والنقص لإظهار المودال
+    else if (interaction.customId === 'reject_task' || interaction.customId === 'missing_photo') {
+      const modal = new ModalBuilder()
+        .setCustomId(`reason_modal_${interaction.customId}_${originalMessage.id}`)
+        .setTitle(interaction.customId === 'reject_task' ? 'سبب الرفض' : 'سبب نقص الصور');
 
-    await originalMessage.react("✅");
-    await interaction.update({ content: "✅ تم الاعتماد وتحديث البيانات.", components: [] });
-  } else {
-    await originalMessage.react(interaction.customId === 'missing_photo' ? "📷" : "❌");
-    await interaction.update({ content: "⚠️ تم تسجيل الملاحظة.", components: [] });
+      const reasonInput = new TextInputBuilder()
+        .setCustomId('reason_text')
+        .setLabel("اكتب السبب هنا")
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+      await interaction.showModal(modal);
+    }
   }
-  setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
+
+  // التعامل مع تقديم المودال (نافذة السبب)
+  if (interaction.isModalSubmit()) {
+    const [_, __, type, msgId] = interaction.customId.split('_');
+    const originalMessage = await interaction.channel.messages.fetch(msgId).catch(() => null);
+    const reason = interaction.fields.getTextInputValue('reason_text');
+
+    if (originalMessage) {
+      const emoji = type === 'reject_task' ? "❌" : "📷";
+      const statusText = type === 'reject_task' ? "رفض التقرير" : "وجود نقص في التقرير";
+      
+      await originalMessage.react(emoji);
+      await originalMessage.reply({
+        content: `⚠️ **تنبيه:** <@${originalMessage.author.id}>\nتم **${statusText}** من قبل الإدارة.\n📝 **السبب:** ${reason}`
+      });
+    }
+
+    await interaction.reply({ content: "✅ تم إرسال السبب وتحديث حالة التقرير.", ephemeral: true });
+    
+    // محاولة مسح رسالة التحكم (الأزرار)
+    const controlMsg = await interaction.channel.messages.fetch(interaction.message.id).catch(() => null);
+    if (controlMsg) await controlMsg.delete().catch(() => {});
+  }
 });
 
 /* ================== تشغيل السيرفر والبوت ================== */
