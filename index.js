@@ -89,12 +89,12 @@ function loadProgress() {
   try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } catch { return {}; }
 }
 
-async function safeIncrement(channelId) {
+async function safeIncrement(channelId, amount = 1) {
   return new Promise((resolve) => {
     queue.push(async () => {
       const data = loadProgress();
       if (!data.stats) data.stats = {};
-      data.stats[channelId] = (data.stats[channelId] || 0) + 1;
+      data.stats[channelId] = (data.stats[channelId] || 0) + amount;
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       resolve(data.stats);
     });
@@ -247,11 +247,52 @@ client.on(Events.MessageCreate, async (message) => {
 
   if (message.author.bot) return;
 
+  // --- أوامر الإدارة الجديدة ---
+
+  // أمر إضافة كورسات
+  if (message.content.startsWith("!addcourse") && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
+    const args = message.content.split(" ");
+    const targetMember = message.mentions.members.first();
+    const amount = parseInt(args[2]) || 1;
+
+    if (!targetMember) return message.reply("❌ يرجى منشن العضو. مثال: `!addcourse @user 5` ");
+
+    await safeSaveUserProgress(targetMember.id, async (userData) => {
+      userData.courses = (userData.courses || 0) + amount;
+      userData.manualPoints = (userData.manualPoints || 0) + amount;
+    });
+
+    const stats = await safeIncrement(COURSES_CHANNEL_ID, amount);
+    await updateStatsEmbed(client, stats);
+    await updateTopWeekEmbed(client);
+
+    return message.reply(`✅ تم إضافة **${amount}** كورس لـ <@${targetMember.id}> بنجاح.`);
+  }
+
+  // أمر إضافة فعاليات
+  if (message.content.startsWith("!addevent") && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
+    const args = message.content.split(" ");
+    const targetMember = message.mentions.members.first();
+    const amount = parseInt(args[2]) || 1;
+
+    if (!targetMember) return message.reply("❌ يرجى منشن العضو. مثال: `!addevent @user 3` ");
+
+    await safeSaveUserProgress(targetMember.id, async (userData) => {
+      userData.events = (userData.events || 0) + amount;
+      userData.manualPoints = (userData.manualPoints || 0) + amount;
+    });
+
+    const stats = await safeIncrement(EVENTS_CHANNEL_ID, amount);
+    await updateStatsEmbed(client, stats);
+    await updateTopWeekEmbed(client);
+
+    return message.reply(`✅ تم إضافة **${amount}** فعالية لـ <@${targetMember.id}> بنجاح.`);
+  }
+
   // امر التصفير الشامل
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
     queue.push(async () => {
       const data = loadProgress();
-      // تصفير نقاط المستخدمين
       for (const key in data) {
         if (key !== 'stats') {
           data[key].manualPoints = 0;
@@ -259,7 +300,6 @@ client.on(Events.MessageCreate, async (message) => {
           data[key].events = 0;
         }
       }
-      // تصفير إحصائيات الأداء العام بالكامل
       data.stats = {
         newMembersCount: 0,
         [READY_COMBINED_ROOM_ID]: 0,
@@ -294,7 +334,6 @@ client.on(Events.MessageCreate, async (message) => {
         upgradeNotified: true
       };
 
-      // تحديث ملف المتابعة
       const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
       if (followChannel) {
         const content = buildFollowMessage(targetMember.id, rank, userData[rankKey].tasks, Object.values(tasksConfig));
@@ -307,7 +346,6 @@ client.on(Events.MessageCreate, async (message) => {
         }
       }
 
-      // إرسال إشعارات الجاهزية
       const rRoom = await client.channels.fetch(readyChannelId).catch(() => null);
       if (rRoom) await rRoom.send({ content: `🎊 **تهنئة إتمام مهام (بأمر إداري)** 🎊\n<@${targetMember.id}> جاهز لترقية Rank ${rank}` });
       
