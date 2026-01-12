@@ -32,7 +32,7 @@ const TOP_WEEK_ROOM_ID = "1460017456662712637";
 
 const READY_RANK_2_ROOM_ID = "1459162819072102574";
 const READY_RANK_3_ROOM_ID = "1459162843327758525";
-const READY_COMBINED_ROOM_ID = "1459162779419414627"; // روم الجاهزين للترقية
+const READY_COMBINED_ROOM_ID = "1459162779419414627"; 
 
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
@@ -58,7 +58,6 @@ const MANUAL_STATS_CHANNELS = {
 };
 
 /* ================== نظام إدارة الملفات ================== */
-
 let isWriting = false;
 const queue = [];
 
@@ -105,10 +104,15 @@ async function updateStatsEmbed(client, statsData) {
   const statsChannel = await client.channels.fetch(STATS_ROOM_ID).catch(() => null);
   if (!statsChannel || !statsData) return;
 
+  // حساب المجموع الكلي للكورسات والفعاليات
+  const totalReports = Object.keys(MANUAL_STATS_CHANNELS).reduce((acc, id) => {
+    return acc + (statsData[id] || 0);
+  }, 0);
+
   const embed = new EmbedBuilder()
     .setTitle("📊 مركز إحصائيات الأداء العام")
     .setDescription("يتم تحديث هذه البيانات تلقائياً بناءً على تقارير الأقسام.")
-    .setColor(0x2b2d31) // لون رمادي غامق احترافي
+    .setColor(0x2b2d31)
     .setThumbnail(client.user.displayAvatarURL())
     .addFields(
       { 
@@ -116,7 +120,12 @@ async function updateStatsEmbed(client, statsData) {
         value: `> ${Object.entries(MANUAL_STATS_CHANNELS)
           .map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``)
           .join("\n> ")}`, 
-        inline: false 
+        inline: true 
+      },
+      {
+        name: "📈 إجمالي العمليات",
+        value: `> **المجموع الكلي:** \`${totalReports}\``,
+        inline: true
       },
       {
         name: "🎖️ شؤون الموظفين",
@@ -178,16 +187,14 @@ const client = new Client({
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  // رصد روم الجاهزين للترقية (حتى لو من البوت)
   if (message.channelId === READY_COMBINED_ROOM_ID) {
     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
     await updateStatsEmbed(client, stats);
-    if (message.author.bot) return; // لا تكمل الإجراءات إذا كان البوت هو من أرسل
+    if (message.author.bot) return;
   }
 
   if (message.author.bot) return;
 
-  // أمر التصفير
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
     const data = loadProgress();
     for (const key in data) if (data[key]?.manualPoints) data[key].manualPoints = 0;
