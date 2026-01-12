@@ -60,6 +60,17 @@ const MANUAL_STATS_CHANNELS = {
   [EVENTS_CHANNEL_ID]: "🎉 عدد الفعاليات"
 };
 
+/* ================== تعريف البوت ================== */
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.MessageContent, 
+    GatewayIntentBits.GuildMembers
+  ],
+  partials: [Partials.Message, Partials.Channel]
+});
+
 /* ================== نظام إدارة الملفات ================== */
 let isWriting = false;
 const queue = [];
@@ -92,7 +103,9 @@ async function safeSaveUserProgress(traineeId, updateFn) {
   return new Promise((resolve) => {
     queue.push(async () => {
       const data = loadProgress();
-      if (!data[traineeId]) data[traineeId] = { courses: 0, events: 0, manualPoints: 0 };
+      if (!data[traineeId]) {
+        data[traineeId] = { courses: 0, events: 0, manualPoints: 0 };
+      }
       await updateFn(data[traineeId]);
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       resolve(data);
@@ -150,7 +163,6 @@ function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   return `### 📑 مـلف تـدريب المـوظفين (Rank ${rank})\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم الإجمالي:**\n┃ ${progressBar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`)`;
 }
 
-// دالة حساب النجوم بناءً على المجموع
 function getStars(total) {
   if (total >= 20) return "⭐⭐⭐⭐⭐⭐⭐+";
   if (total >= 15) return "⭐⭐⭐⭐⭐⭐⭐";
@@ -167,7 +179,6 @@ async function updateTopWeekEmbed(client) {
   const data = loadProgress();
   const guild = topChannel.guild;
 
-  // استخراج وترتيب المستخدمين بناءً على المجموع الكلي (manualPoints)
   const leaderboard = Object.entries(data)
     .filter(([id, val]) => id !== 'stats' && (val.manualPoints || 0) > 0)
     .sort((a, b) => (b[1].manualPoints || 0) - (a[1].manualPoints || 0));
@@ -176,7 +187,6 @@ async function updateTopWeekEmbed(client) {
     .setTitle("🏆 قائمة فرسان الأسبوع المتميزين")
     .setDescription("يتم تحديث الترتيب بناءً على مجموع الكورسات والفعاليات المعتمدة.")
     .setColor(0xFFAA00)
-    .setThumbnail("https://i.imgur.com/u7766pS.png") // رابط أيقونة كأس اختياري
     .setFooter({ text: "نظام التقييم الأسبوعي • تحديث تلقائي", iconURL: client.user.displayAvatarURL() })
     .setTimestamp();
 
@@ -206,6 +216,11 @@ async function updateTopWeekEmbed(client) {
 }
 
 /* ================== الأحداث ================== */
+
+client.on(Events.ClientReady, () => {
+  console.log(`Logged in as ${client.user.tag}!`);
+});
+
 client.on(Events.MessageCreate, async (message) => {
   if (message.channelId === READY_COMBINED_ROOM_ID) {
     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
@@ -235,7 +250,7 @@ client.on(Events.MessageCreate, async (message) => {
 
   if (rank) {
     const progress = loadProgress();
-    if (progress[message.author.id]?.[`rank${rank}`]?.completedRooms.includes(message.channelId)) {
+    if (progress[message.author.id]?.[`rank${rank}`]?.completedRooms?.includes(message.channelId)) {
       return message.delete().catch(() => {});
     }
   }
@@ -251,8 +266,10 @@ client.on(Events.MessageCreate, async (message) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
-  const member = await interaction.guild.members.fetch(interaction.user.id);
-  if (!member.roles.cache.has(ADMIN_ROLE_ID)) return interaction.reply({ content: "صلاحيات إدارية فقط.", ephemeral: true });
+  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+  if (!member || !member.roles.cache.has(ADMIN_ROLE_ID)) {
+    return interaction.reply({ content: "صلاحيات إدارية فقط.", ephemeral: true });
+  }
 
   const originalMessage = await interaction.channel.messages.fetch(interaction.message.reference.messageId).catch(() => null);
   if (!originalMessage) return interaction.reply({ content: "الرسالة الأصلية مفقودة.", ephemeral: true });
@@ -286,7 +303,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         data.completedRooms.push(roomId);
         data.tasks.push(rank === 2 ? TASKS_RANK_2[roomId] : TASKS_RANK_3[roomId]);
 
-        const followChannel = await client.channels.fetch(FOLLOW_ROLE_ID).catch(() => null);
+        const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
         if (followChannel) {
           const content = buildFollowMessage(traineeId, rank, data.tasks, Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3));
           if (data.followMessageId) {
@@ -318,12 +335,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
 });
 
-const client_init = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
-  partials: [Partials.Message, Partials.Channel]
-});
-
+/* ================== تشغيل السيرفر والبوت ================== */
 const app = express();
 app.get("/", (req, res) => res.send("Bot Stats Online ✅"));
 app.listen(process.env.PORT || 3000);
+
 client.login(process.env.TOKEN);
