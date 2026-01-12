@@ -69,7 +69,7 @@ const client = new Client({
     GatewayIntentBits.Guilds, 
     GatewayIntentBits.GuildMessages, 
     GatewayIntentBits.MessageContent, 
-    GatewayIntentBits.GuildMembers // ضروري لرصد دخول الأعضاء
+    GatewayIntentBits.GuildMembers 
   ],
   partials: [Partials.Message, Partials.Channel]
 });
@@ -227,7 +227,6 @@ client.on(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
-// حدث رصد المتدربين الجدد
 client.on(Events.GuildMemberAdd, async (member) => {
   queue.push(async () => {
     const data = loadProgress();
@@ -240,32 +239,91 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 client.on(Events.MessageCreate, async (message) => {
+  if (message.author.bot) return;
+
+  // نظام الأوامر الإدارية
+  if (message.content.startsWith("!")) {
+    const args = message.content.slice(1).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+
+    // أمر التصفير
+    if (command === "تصفير" || command === "reset") {
+      if (!message.member.roles.cache.has(ADMIN_ROLE_ID)) return;
+      const data = loadProgress();
+      
+      // تصفير بيانات جميع المستخدمين
+      for (const key in data) {
+        if (key !== 'stats') {
+          data[key].manualPoints = 0;
+          data[key].courses = 0;
+          data[key].events = 0;
+        }
+      }
+      // تصفير الإحصائيات العامة
+      data.stats = {
+        newMembersCount: 0,
+        [COURSES_CHANNEL_ID]: 0,
+        [EVENTS_CHANNEL_ID]: 0,
+        [READY_COMBINED_ROOM_ID]: 0
+      };
+
+      fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+      await updateTopWeekEmbed(client);
+      await updateStatsEmbed(client, data.stats);
+      return message.reply("✅ تم تصفير جميع النقاط، إحصائيات المتدربين، ولوحة الشرف بنجاح.");
+    }
+
+    // أوامر الإتمام التلقائي
+    if (command === "مكمل") {
+      if (!message.member.roles.cache.has(ADMIN_ROLE_ID)) return;
+      const rankNum = parseInt(args[0]);
+      const targetUser = message.mentions.users.first();
+
+      if (!targetUser || (rankNum !== 2 && rankNum !== 3)) {
+        return message.reply("⚠️ الاستخدام الصحيح: `!مكمل [2 أو 3] @user`.");
+      }
+
+      const tasksMap = rankNum === 2 ? TASKS_RANK_2 : TASKS_RANK_3;
+      const readyChannelId = rankNum === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID;
+
+      await safeSaveUserProgress(targetUser.id, async (userData) => {
+        const rankKey = `rank${rankNum}`;
+        userData[rankKey] = {
+          tasks: Object.values(tasksMap),
+          completedRooms: Object.keys(tasksMap),
+          followMessageId: userData[rankKey]?.followMessageId || null,
+          upgradeNotified: true
+        };
+
+        // تحديث رسالة المتابعة
+        const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
+        if (followChannel) {
+          const content = buildFollowMessage(targetUser.id, rankNum, userData[rankKey].tasks, Object.values(tasksMap));
+          if (userData[rankKey].followMessageId) {
+            const m = await followChannel.messages.fetch(userData[rankKey].followMessageId).catch(() => null);
+            if (m) await m.edit({ content });
+          } else {
+            const nm = await followChannel.send({ content });
+            userData[rankKey].followMessageId = nm.id;
+          }
+        }
+
+        // إرسال إشعارات الترقية
+        const rRoom = await client.channels.fetch(readyChannelId).catch(() => null);
+        if (rRoom) await rRoom.send({ content: `🎊 **تهنئة إتمام مهام (يدوي)** 🎊\n<@${targetUser.id}> مكمل كل مهام Rank ${rankNum}` });
+        
+        const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
+        if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية يدوي**\n> 👤 **المتدرب:** <@${targetUser.id}>\n> 🎖️ **الرتبة:** \`Rank ${rankNum}\`\n> ✨ **الحالة:** جاهز ✅`);
+      });
+
+      return message.reply(`✅ تم تحديد <@${targetUser.id}> كمكمل لجميع مهام Rank ${rankNum} بنجاح.`);
+    }
+  }
+
+  // معالجة تقارير الغرف
   if (message.channelId === READY_COMBINED_ROOM_ID) {
     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
     await updateStatsEmbed(client, stats);
-    if (message.author.bot) return;
-  }
-
-  if (message.author.bot) return;
-
-  if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
-    const data = loadProgress();
-    for (const key in data) {
-      if (data[key]?.manualPoints !== undefined) {
-        data[key].manualPoints = 0;
-        data[key].courses = 0;
-        data[key].events = 0;
-      }
-    }
-    // تصفير عداد الأعضاء الجدد أيضاً
-    if (data.stats) {
-      data.stats.newMembersCount = 0;
-    }
-
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    await updateTopWeekEmbed(client);
-    await updateStatsEmbed(client, data.stats);
-    return message.reply("✅ تم تصفير جميع النقاط وإحصائيات المتدربين الجدد.");
   }
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
@@ -395,7 +453,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-/* ================== تشغيل السيرفر والبوت ================== */
 const app = express();
 app.get("/", (req, res) => res.send("Bot Stats Online ✅"));
 app.listen(process.env.PORT || 3000);
