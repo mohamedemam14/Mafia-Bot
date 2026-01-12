@@ -40,6 +40,8 @@ const READY_COMBINED_ROOM_ID = "1459162779419414627";
 const COURSES_CHANNEL_ID = "1459162757135073323";
 const EVENTS_CHANNEL_ID = "1459162754173894801";
 
+const LINE_URL = "https://e.top4top.io/p_3300j1q3y1.png"; // رابط الخط
+
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
   "1459162799212200156": "الاستقبال",
@@ -292,6 +294,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
         
         await updateTopWeekEmbed(client);
+        // إرسال رابط الخط بعد القبول في غرف الفعاليات والكورسات
+        await interaction.channel.send(LINE_URL).catch(() => {});
       }
 
       await safeSaveUserProgress(traineeId, async (userData) => {
@@ -311,10 +315,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const content = buildFollowMessage(traineeId, rank, data.tasks, Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3));
             if (data.followMessageId) {
               const m = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
-              if (m) await m.edit({ content });
+              if (m) {
+                await m.edit({ content });
+                await followChannel.send(LINE_URL).catch(() => {}); // إرسال الخط في روم المتابعة
+              }
             } else {
               const nm = await followChannel.send({ content });
               data.followMessageId = nm.id;
+              await followChannel.send(LINE_URL).catch(() => {}); // إرسال الخط في روم المتابعة
             }
           }
 
@@ -326,6 +334,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
             if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
           }
+          
+          // إرسال رابط الخط بعد القبول في غرف الـ 12 روم
+          await interaction.channel.send(LINE_URL).catch(() => {});
         }
       });
 
