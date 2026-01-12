@@ -86,7 +86,12 @@ async function processQueue() {
 }
 
 function loadProgress() {
-  try { return JSON.parse(fs.readFileSync(DATA_FILE, "utf8")); } catch { return {}; }
+  try {
+    const content = fs.readFileSync(DATA_FILE, "utf8");
+    return JSON.parse(content);
+  } catch {
+    return {};
+  }
 }
 
 async function safeIncrement(channelId, amount = 1) {
@@ -109,11 +114,6 @@ async function safeSaveUserProgress(traineeId, updateFn) {
       if (!data[traineeId]) {
         data[traineeId] = { courses: 0, events: 0, manualPoints: 0 };
       }
-      // تأكد من وجود القيم لتجنب NaN
-      data[traineeId].courses = data[traineeId].courses || 0;
-      data[traineeId].events = data[traineeId].events || 0;
-      data[traineeId].manualPoints = data[traineeId].manualPoints || 0;
-
       await updateFn(data[traineeId]);
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       resolve(data);
@@ -158,8 +158,8 @@ async function updateStatsEmbed(client, statsData) {
     .setFooter({ text: "نظام إدارة الإحصائيات التلقائي", iconURL: client.user.displayAvatarURL() })
     .setTimestamp();
 
-  const messages = await statsChannel.messages.fetch({ limit: 10 });
-  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "📊 مركز إحصائيات الأداء العام");
+  const messages = await statsChannel.messages.fetch({ limit: 10 }).catch(() => []);
+  const botMsg = Array.isArray(messages) ? messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "📊 مركز إحصائيات الأداء العام") : null;
   
   if (botMsg) await botMsg.edit({ embeds: [embed] });
   else await statsChannel.send({ embeds: [embed] });
@@ -220,8 +220,8 @@ async function updateTopWeekEmbed(client) {
     embed.setDescription(lines.join("\n"));
   }
 
-  const messages = await topChannel.messages.fetch({ limit: 10 });
-  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة فرسان الأسبوع المتميزين");
+  const messages = await topChannel.messages.fetch({ limit: 10 }).catch(() => []);
+  const botMsg = Array.isArray(messages) ? messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة فرسان الأسبوع المتميزين") : null;
   if (botMsg) await botMsg.edit({ embeds: [embed] });
   else await topChannel.send({ embeds: [embed] });
 }
@@ -244,13 +244,13 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  if (message.channelId === READY_COMBINED_ROOM_ID) {
-    const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
-    await updateStatsEmbed(client, stats);
-    if (message.author.bot) return;
+  if (message.author.bot) {
+    if (message.channelId === READY_COMBINED_ROOM_ID) {
+      const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
+      await updateStatsEmbed(client, stats);
+    }
+    return;
   }
-
-  if (message.author.bot) return;
 
   // امر التصفير الشامل
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
@@ -279,31 +279,26 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
-  // أوامر الإضافة اليدوية (كورسات / فعاليات)
+  // إصلاح أوامر الإضافة اليدوية (كورسات / فعاليات)
   if ((message.content.startsWith("!addcourse") || message.content.startsWith("!addevent")) && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
-    const args = message.content.trim().split(/\s+/);
+    const args = message.content.split(/\s+/);
     const targetMember = message.mentions.members.first();
-    
+
     if (!targetMember) return message.reply("❌ يرجى منشن العضو. مثال: `!addcourse @user 5` ");
 
-    // تحديد مكان العدد: إذا كان المنشن هو الأول، العدد يكون في args[2]، وإذا كان المنشن الأخير، نأخذ آخر عنصر
-    let amountStr = args.find(arg => !isNaN(arg) && !arg.includes("<@"));
-    const amount = parseInt(amountStr) || 1;
+    // البحث عن الرقم في الرسالة
+    const amountArg = args.find(a => /^\d+$/.test(a));
+    const amount = amountArg ? parseInt(amountArg) : 1;
 
     const isCourse = message.content.startsWith("!addcourse");
     const channelId = isCourse ? COURSES_CHANNEL_ID : EVENTS_CHANNEL_ID;
 
-    // تحديث نقاط العضو
     await safeSaveUserProgress(targetMember.id, async (userData) => {
       userData.manualPoints = (userData.manualPoints || 0) + amount;
-      if (isCourse) {
-        userData.courses = (userData.courses || 0) + amount;
-      } else {
-        userData.events = (userData.events || 0) + amount;
-      }
+      if (isCourse) userData.courses = (userData.courses || 0) + amount;
+      else userData.events = (userData.events || 0) + amount;
     });
 
-    // تحديث الإحصائيات العامة
     const stats = await safeIncrement(channelId, amount);
     await updateStatsEmbed(client, stats);
     await updateTopWeekEmbed(client);
@@ -455,14 +450,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.isModalSubmit()) {
     const parts = interaction.customId.split('_');
-    const actionType = parts[1]; // reject_task or missing_photo
-    const msgId = parts[2]; 
+    const msgId = parts[3]; 
     
     const reason = interaction.fields.getTextInputValue('reason_text');
     const originalMessage = await interaction.channel.messages.fetch(msgId).catch(() => null);
 
     if (originalMessage) {
-      const isReject = actionType === 'reject_task';
+      const isReject = interaction.customId.includes('reject_task');
       const emoji = isReject ? "❌" : "📷";
       const statusText = isReject ? "رفض التقرير" : "وجود نقص في التقرير";
       
