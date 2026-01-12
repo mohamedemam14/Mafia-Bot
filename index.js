@@ -268,7 +268,6 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  // التعامل مع الأزرار
   if (interaction.isButton()) {
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     if (!member || !member.roles.cache.has(ADMIN_ROLE_ID)) {
@@ -334,11 +333,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.update({ content: "✅ تم الاعتماد وتحديث البيانات.", components: [] });
       setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
     } 
-    
-    // التعامل مع أزرار الرفض والنقص لإظهار المودال
     else if (interaction.customId === 'reject_task' || interaction.customId === 'missing_photo') {
       const modal = new ModalBuilder()
-        .setCustomId(`reason_modal_${interaction.customId}_${originalMessage.id}`)
+        .setCustomId(`modal_${interaction.customId}_${originalMessage.id}`)
         .setTitle(interaction.customId === 'reject_task' ? 'سبب الرفض' : 'سبب نقص الصور');
 
       const reasonInput = new TextInputBuilder()
@@ -352,25 +349,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   }
 
-  // التعامل مع تقديم المودال (نافذة السبب)
   if (interaction.isModalSubmit()) {
-    const [_, __, type, msgId] = interaction.customId.split('_');
-    const originalMessage = await interaction.channel.messages.fetch(msgId).catch(() => null);
+    const parts = interaction.customId.split('_');
+    const type = parts[1]; // reject أو missing
+    const msgId = parts[3]; // معرف الرسالة
+    
     const reason = interaction.fields.getTextInputValue('reason_text');
+    const originalMessage = await interaction.channel.messages.fetch(msgId).catch(() => null);
 
     if (originalMessage) {
-      const emoji = type === 'reject_task' ? "❌" : "📷";
-      const statusText = type === 'reject_task' ? "رفض التقرير" : "وجود نقص في التقرير";
+      const isReject = interaction.customId.includes('reject_task');
+      const emoji = isReject ? "❌" : "📷";
+      const statusText = isReject ? "رفض التقرير" : "وجود نقص في التقرير";
       
-      await originalMessage.react(emoji);
+      await originalMessage.react(emoji).catch(() => {});
       await originalMessage.reply({
         content: `⚠️ **تنبيه:** <@${originalMessage.author.id}>\nتم **${statusText}** من قبل الإدارة.\n📝 **السبب:** ${reason}`
       });
     }
 
-    await interaction.reply({ content: "✅ تم إرسال السبب وتحديث حالة التقرير.", ephemeral: true });
+    await interaction.reply({ content: "✅ تم تسجيل السبب بنجاح.", ephemeral: true });
     
-    // محاولة مسح رسالة التحكم (الأزرار)
+    // حذف رسالة التحكم (الأزرار) بعد الانتهاء
     const controlMsg = await interaction.channel.messages.fetch(interaction.message.id).catch(() => null);
     if (controlMsg) await controlMsg.delete().catch(() => {});
   }
