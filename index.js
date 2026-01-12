@@ -69,7 +69,7 @@ const client = new Client({
     GatewayIntentBits.Guilds, 
     GatewayIntentBits.GuildMessages, 
     GatewayIntentBits.MessageContent, 
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers // ضروري لرصد دخول الأعضاء
   ],
   partials: [Partials.Message, Partials.Channel]
 });
@@ -124,10 +124,11 @@ async function updateStatsEmbed(client, statsData) {
   if (!statsChannel || !statsData) return;
 
   const totalReports = Object.keys(MANUAL_STATS_CHANNELS).reduce((acc, id) => acc + (statsData[id] || 0), 0);
+  const newMembersCount = statsData.newMembersCount || 0;
 
   const embed = new EmbedBuilder()
     .setTitle("📊 مركز إحصائيات الأداء العام")
-    .setDescription("يتم تحديث هذه البيانات تلقائياً بناءً على تقارير الأقسام.")
+    .setDescription("يتم تحديث هذه البيانات تلقائياً بناءً على تقارير الأقسام وحركة الأعضاء.")
     .setColor(0x2b2d31)
     .setThumbnail(client.user.displayAvatarURL())
     .addFields(
@@ -145,7 +146,7 @@ async function updateStatsEmbed(client, statsData) {
       },
       {
         name: "🎖️ شؤون الموظفين",
-        value: `> **✅ جاهزين للترقية:** \`${statsData[READY_COMBINED_ROOM_ID] || 0}\``,
+        value: `> **👶 المتدربين الجدد:** \`${newMembersCount}\`\n> **✅ جاهزين للترقية:** \`${statsData[READY_COMBINED_ROOM_ID] || 0}\``,
         inline: false
       }
     )
@@ -159,13 +160,10 @@ async function updateStatsEmbed(client, statsData) {
   else await statsChannel.send({ embeds: [embed] });
 }
 
-// تعديل الدالة لضمان ظهور الخط
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
   const progressBar = "🔹".repeat(Math.round(percent/10)) + "🔸".repeat(10 - Math.round(percent/10));
   const list = totalTasks.map(t => doneTasks.includes(t) ? `┃ ✅ **${t}**` : `┃ 🔘 *${t}*`).join("\n");
-  
-  // رابط الخط الـ GIF
   const lineGif = "https://cdn.discordapp.com/attachments/1425444776240611420/1460346562340323505/1571650a7c706000-1.gif";
 
   return `### 📑 مـلف تـدريب المـوظفين (Rank ${rank})\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم الإجمالي:**\n┃ ${progressBar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`)\n${lineGif}`;
@@ -229,6 +227,18 @@ client.on(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
+// حدث رصد المتدربين الجدد
+client.on(Events.GuildMemberAdd, async (member) => {
+  queue.push(async () => {
+    const data = loadProgress();
+    if (!data.stats) data.stats = {};
+    data.stats.newMembersCount = (data.stats.newMembersCount || 0) + 1;
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    await updateStatsEmbed(client, data.stats);
+  });
+  processQueue();
+});
+
 client.on(Events.MessageCreate, async (message) => {
   if (message.channelId === READY_COMBINED_ROOM_ID) {
     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
@@ -247,9 +257,15 @@ client.on(Events.MessageCreate, async (message) => {
         data[key].events = 0;
       }
     }
+    // تصفير عداد الأعضاء الجدد أيضاً
+    if (data.stats) {
+      data.stats.newMembersCount = 0;
+    }
+
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
     await updateTopWeekEmbed(client);
-    return message.reply("✅ تم تصفير جميع النقاط والإحصائيات الأسبوعية.");
+    await updateStatsEmbed(client, data.stats);
+    return message.reply("✅ تم تصفير جميع النقاط وإحصائيات المتدربين الجدد.");
   }
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
