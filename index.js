@@ -39,7 +39,7 @@ const READY_COMBINED_ROOM_ID = "1459162779419414627";
 
 const COURSES_CHANNEL_ID = "1459162757135073323";
 const EVENTS_CHANNEL_ID = "1459162754173894801";
-const NEW_MEMBERS_ROOM_ID = "1459162735488008234"; // روم تسجيل المتدربين الجدد
+const NEW_MEMBERS_ROOM_ID = "1459162735488008234"; // روم المتدربين الجدد (نظام ريأكشن)
 
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
@@ -70,9 +70,10 @@ const client = new Client({
     GatewayIntentBits.Guilds, 
     GatewayIntentBits.GuildMessages, 
     GatewayIntentBits.MessageContent, 
-    GatewayIntentBits.GuildMembers 
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessageReactions
   ],
-  partials: [Partials.Message, Partials.Channel]
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User]
 });
 
 /* ================== نظام إدارة الملفات ================== */
@@ -241,6 +242,21 @@ client.on(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
+// نظام الريأكشن لروم المتدربين الجدد
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  if (user.bot) return;
+  if (reaction.partial) await reaction.fetch().catch(() => null);
+  if (reaction.message.partial) await reaction.message.fetch().catch(() => null);
+
+  if (reaction.message.channelId === NEW_MEMBERS_ROOM_ID) {
+    const member = await reaction.message.guild.members.fetch(user.id).catch(() => null);
+    if (member && member.roles.cache.has(ADMIN_ROLE_ID)) {
+      const stats = await safeIncrementNewMembers();
+      await updateStatsEmbed(client, stats);
+    }
+  }
+});
+
 client.on(Events.MessageCreate, async (message) => {
   if (message.channelId === READY_COMBINED_ROOM_ID) {
     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
@@ -254,7 +270,6 @@ client.on(Events.MessageCreate, async (message) => {
   if (message.content === "!reset" && message.member.roles.cache.has(ADMIN_ROLE_ID)) {
     queue.push(async () => {
       const data = loadProgress();
-      // تصفير نقاط المستخدمين
       for (const key in data) {
         if (key !== 'stats') {
           data[key].manualPoints = 0;
@@ -262,7 +277,6 @@ client.on(Events.MessageCreate, async (message) => {
           data[key].events = 0;
         }
       }
-      // تصفير إحصائيات الأداء العام بالكامل
       data.stats = {
         newMembersCount: 0,
         [READY_COMBINED_ROOM_ID]: 0,
@@ -297,7 +311,6 @@ client.on(Events.MessageCreate, async (message) => {
         upgradeNotified: true
       };
 
-      // تحديث ملف المتابعة
       const followChannel = await client.channels.fetch(FOLLOW_ROOM_ID).catch(() => null);
       if (followChannel) {
         const content = buildFollowMessage(targetMember.id, rank, userData[rankKey].tasks, Object.values(tasksConfig));
@@ -310,7 +323,6 @@ client.on(Events.MessageCreate, async (message) => {
         }
       }
 
-      // إرسال إشعارات الجاهزية
       const rRoom = await client.channels.fetch(readyChannelId).catch(() => null);
       if (rRoom) await rRoom.send({ content: `🎊 **تهنئة إتمام مهام (بأمر إداري)** 🎊\n<@${targetMember.id}> جاهز لترقية Rank ${rank}` });
       
@@ -323,9 +335,9 @@ client.on(Events.MessageCreate, async (message) => {
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
-  const isNewMemberRoom = message.channelId === NEW_MEMBERS_ROOM_ID;
-
-  if (!rank && !isManual && !isNewMemberRoom) return;
+  
+  // تجاهل روم المتدربين الجدد في نظام الأزرار (لأنه صار نظام ريأكشن)
+  if (!rank && !isManual) return;
 
   if (rank) {
     const progress = loadProgress();
@@ -357,13 +369,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const roomId = interaction.channelId;
 
     if (interaction.customId === 'approve_task') {
-      // التعامل مع روم المتدربين الجدد
-      if (roomId === NEW_MEMBERS_ROOM_ID) {
-        const stats = await safeIncrementNewMembers();
-        await updateStatsEmbed(client, stats);
-      }
-      
-      // التعامل مع رومات الكورسات والفعاليات
       if (MANUAL_STATS_CHANNELS[roomId]) {
         const stats = await safeIncrement(roomId);
         await updateStatsEmbed(client, stats);
@@ -377,7 +382,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await updateTopWeekEmbed(client);
       }
 
-      // التعامل مع رومات المهام (Rank 2 & 3)
       await safeSaveUserProgress(traineeId, async (userData) => {
         const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
         if (!rank) return;
