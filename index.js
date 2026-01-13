@@ -39,7 +39,9 @@ const READY_COMBINED_ROOM_ID = "1459162779419414627";
 
 const COURSES_CHANNEL_ID = "1459162757135073323";
 const EVENTS_CHANNEL_ID = "1459162754173894801";
-const NEW_MEMBERS_ROOM_ID = "1459162735488008234"; // روم المتدربين الجدد (نظام ريأكشن)
+const NEW_MEMBERS_ROOM_ID = "1459162735488008234"; // روم المتدربين الجدد
+
+const LINE_GIF_URL = "https://cdn.discordapp.com/attachments/1425444776240611420/1460346562340323505/1571650a7c706000-1.gif";
 
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
@@ -179,9 +181,8 @@ function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
   const percent = Math.round((doneTasks.length / totalTasks.length) * 100);
   const progressBar = "🔹".repeat(Math.round(percent/10)) + "🔸".repeat(10 - Math.round(percent/10));
   const list = totalTasks.map(t => doneTasks.includes(t) ? `┃ ✅ **${t}**` : `┃ 🔘 *${t}*`).join("\n");
-  const lineGif = "https://cdn.discordapp.com/attachments/1425444776240611420/1460346562340323505/1571650a7c706000-1.gif";
-
-  return `### 📑 مـلف تـدريب المـوظفين (Rank ${rank})\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم الإجمالي:**\n┃ ${progressBar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`)\n${lineGif}`;
+  
+  return `### 📑 مـلف تـدريب المـوظفين (Rank ${rank})\n┏━━━━━━━━━━━━━━━━━━┓\n  👤 **المتدرب:** <@${userId}>\n  🎖️ **الرتبة:** \`Rank ${rank}\`\n┗━━━━━━━━━━━━━━━━━━┛\n\n✨ **المهام المنجزة:**\n${list}\n\n📊 **التقدم الإجمالي:**\n┃ ${progressBar} **${percent}%**\n┃ (\`${doneTasks.length}/${totalTasks.length}\`)\n${LINE_GIF_URL}`;
 }
 
 function getStars(total) {
@@ -258,6 +259,11 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 });
 
 client.on(Events.MessageCreate, async (message) => {
+  // إرسال الخط التلقائي في روم المتدربين الجدد
+  if (message.channelId === NEW_MEMBERS_ROOM_ID && !message.author.bot) {
+    await message.channel.send(LINE_GIF_URL).catch(() => null);
+  }
+
   if (message.channelId === READY_COMBINED_ROOM_ID) {
     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
     await updateStatsEmbed(client, stats);
@@ -336,7 +342,6 @@ client.on(Events.MessageCreate, async (message) => {
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
   
-  // تجاهل روم المتدربين الجدد في نظام الأزرار (لأنه صار نظام ريأكشن)
   if (!rank && !isManual) return;
 
   if (rank) {
