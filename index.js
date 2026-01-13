@@ -186,11 +186,11 @@ function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
 }
 
 function getStars(total) {
-  if (total >= 20) return "⭐⭐⭐⭐⭐⭐⭐+";
-  if (total >= 15) return "⭐⭐⭐⭐⭐⭐⭐";
-  if (total >= 10) return "⭐⭐⭐⭐⭐";
-  if (total >= 5)  return "⭐⭐⭐";
-  if (total >= 2)  return "⭐⭐";
+  if (total >= 20) return "⭐⭐⭐⭐⭐🌟";
+  if (total >= 15) return "⭐⭐⭐⭐⭐";
+  if (total >= 10) return "⭐⭐⭐";
+  if (total >= 5)  return "⭐⭐";
+  if (total >= 2)  return "⭐";
   return "🌑";
 }
 
