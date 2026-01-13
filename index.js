@@ -39,6 +39,7 @@ const READY_COMBINED_ROOM_ID = "1459162779419414627";
 
 const COURSES_CHANNEL_ID = "1459162757135073323";
 const EVENTS_CHANNEL_ID = "1459162754173894801";
+const NEW_MEMBERS_ROOM_ID = "1459162735488008234"; // روم تسجيل المتدربين الجدد
 
 const TASKS_RANK_2 = {
   "1459162810130108448": "الإرشاد",
@@ -95,6 +96,19 @@ async function safeIncrement(channelId) {
       const data = loadProgress();
       if (!data.stats) data.stats = {};
       data.stats[channelId] = (data.stats[channelId] || 0) + 1;
+      fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+      resolve(data.stats);
+    });
+    processQueue();
+  });
+}
+
+async function safeIncrementNewMembers() {
+  return new Promise((resolve) => {
+    queue.push(async () => {
+      const data = loadProgress();
+      if (!data.stats) data.stats = {};
+      data.stats.newMembersCount = (data.stats.newMembersCount || 0) + 1;
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       resolve(data.stats);
     });
@@ -227,17 +241,6 @@ client.on(Events.ClientReady, () => {
   console.log(`Logged in as ${client.user.tag}!`);
 });
 
-client.on(Events.GuildMemberAdd, async (member) => {
-  queue.push(async () => {
-    const data = loadProgress();
-    if (!data.stats) data.stats = {};
-    data.stats.newMembersCount = (data.stats.newMembersCount || 0) + 1;
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    await updateStatsEmbed(client, data.stats);
-  });
-  processQueue();
-});
-
 client.on(Events.MessageCreate, async (message) => {
   if (message.channelId === READY_COMBINED_ROOM_ID) {
     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
@@ -320,7 +323,9 @@ client.on(Events.MessageCreate, async (message) => {
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
   const isManual = MANUAL_STATS_CHANNELS[message.channelId];
-  if (!rank && !isManual) return;
+  const isNewMemberRoom = message.channelId === NEW_MEMBERS_ROOM_ID;
+
+  if (!rank && !isManual && !isNewMemberRoom) return;
 
   if (rank) {
     const progress = loadProgress();
@@ -352,6 +357,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const roomId = interaction.channelId;
 
     if (interaction.customId === 'approve_task') {
+      // التعامل مع روم المتدربين الجدد
+      if (roomId === NEW_MEMBERS_ROOM_ID) {
+        const stats = await safeIncrementNewMembers();
+        await updateStatsEmbed(client, stats);
+      }
+      
+      // التعامل مع رومات الكورسات والفعاليات
       if (MANUAL_STATS_CHANNELS[roomId]) {
         const stats = await safeIncrement(roomId);
         await updateStatsEmbed(client, stats);
@@ -365,6 +377,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await updateTopWeekEmbed(client);
       }
 
+      // التعامل مع رومات المهام (Rank 2 & 3)
       await safeSaveUserProgress(traineeId, async (userData) => {
         const rank = TASKS_RANK_2[roomId] ? 2 : (TASKS_RANK_3[roomId] ? 3 : null);
         if (!rank) return;
