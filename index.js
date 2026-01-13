@@ -451,8 +451,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (originalMessage) {
       const isReject = interaction.customId.includes('reject_task');
-      const emoji = isReject ? "❌" : "📷";
-      const statusText = isReject ? "رفض التقرير" : "وجود نقص في التقرير";
+      const emoji = isReject ? "❌" : "❗";
+      const statusText = isReject ? "رفض التقرير" : "وجود نقص في المهمة";
       
       await originalMessage.react(emoji).catch(() => {});
       await originalMessage.reply({
