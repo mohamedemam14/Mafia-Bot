@@ -150,7 +150,7 @@ async function updateStatsEmbed(client, statsData) {
     .setThumbnail(client.user.displayAvatarURL())
     .addFields(
       { 
-        name: "📂 التقارير الميدانية", 
+        name: "📂 نشاط فريق التدريب", 
         value: `> ${Object.entries(MANUAL_STATS_CHANNELS)
           .map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``)
           .join("\n> ")}`, 
@@ -163,7 +163,7 @@ async function updateStatsEmbed(client, statsData) {
       },
       {
         name: "🎖️ شؤون الموظفين",
-        value: `> **👶 المتدربين الجدد:** \`${newMembersCount}\`\n> **✅ جاهزين للترقية:** \`${statsData[READY_COMBINED_ROOM_ID] || 0}\``,
+        value: `> **👤 المتدربين الجدد:** \`${newMembersCount}\`\n> **✅ جاهزين للترقية:** \`${statsData[READY_COMBINED_ROOM_ID] || 0}\``,
         inline: false
       }
     )
