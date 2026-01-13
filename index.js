@@ -39,7 +39,7 @@ const READY_COMBINED_ROOM_ID = "1459162779419414627";
 
 const COURSES_CHANNEL_ID = "1459162757135073323";
 const EVENTS_CHANNEL_ID = "1459162754173894801";
-const NEW_MEMBERS_ROOM_ID = "1459162735488008234"; // روم المتدربين الجدد
+const NEW_MEMBERS_ROOM_ID = "1459162735488008234"; 
 
 const LINE_GIF_URL = "https://cdn.discordapp.com/attachments/1425444776240611420/1460346562340323505/1571650a7c706000-1.gif";
 
@@ -170,7 +170,7 @@ async function updateStatsEmbed(client, statsData) {
     .setFooter({ text: "نظام إدارة الإحصائيات التلقائي", iconURL: client.user.displayAvatarURL() })
     .setTimestamp();
 
-  const messages = await statsChannel.messages.fetch({ limit: 10 });
+  const messages = await statsChannel.messages.fetch({ limit: 20 });
   const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "📊 مركز إحصائيات الأداء العام");
   
   if (botMsg) await botMsg.edit({ embeds: [embed] });
@@ -206,7 +206,7 @@ async function updateTopWeekEmbed(client) {
     .sort((a, b) => (b[1].manualPoints || 0) - (a[1].manualPoints || 0));
 
   const embed = new EmbedBuilder()
-    .setTitle("🏆 قائمة التوب الاسبوعي")
+    .setTitle("🏆 قائمة فرسان الأسبوع المتميزين")
     .setDescription("يتم تحديث الترتيب بناءً على مجموع الكورسات والفعاليات المعتمدة.")
     .setColor(0xFFAA00)
     .setFooter({ text: "نظام التقييم الأسبوعي • تحديث تلقائي", iconURL: client.user.displayAvatarURL() })
@@ -231,10 +231,15 @@ async function updateTopWeekEmbed(client) {
     embed.setDescription(lines.join("\n"));
   }
 
-  const messages = await topChannel.messages.fetch({ limit: 10 });
+  // البحث عن رسالة البوت السابقة لتعديلها
+  const messages = await topChannel.messages.fetch({ limit: 20 });
   const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة فرسان الأسبوع المتميزين");
-  if (botMsg) await botMsg.edit({ embeds: [embed] });
-  else await topChannel.send({ embeds: [embed] });
+  
+  if (botMsg) {
+    await botMsg.edit({ embeds: [embed] });
+  } else {
+    await topChannel.send({ embeds: [embed] });
+  }
 }
 
 /* ================== الأحداث ================== */
