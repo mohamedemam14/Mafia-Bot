@@ -206,7 +206,7 @@ async function updateTopWeekEmbed(client) {
     .sort((a, b) => (b[1].manualPoints || 0) - (a[1].manualPoints || 0));
 
   const embed = new EmbedBuilder()
-    .setTitle("🏆 قائمة فرسان الأسبوع المتميزين")
+    .setTitle("🏆 قائمة التوب الاسبوعي")
     .setDescription("يتم تحديث الترتيب بناءً على مجموع الكورسات والفعاليات المعتمدة.")
     .setColor(0xFFAA00)
     .setFooter({ text: "نظام التقييم الأسبوعي • تحديث تلقائي", iconURL: client.user.displayAvatarURL() })
