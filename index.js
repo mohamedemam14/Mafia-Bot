@@ -474,7 +474,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 /* ================== تشغيل السيرفر والبوت ================== */
 const app = express();
-app.get("/", (req, res) => res.send("Bot Stats Online ✅"));
-app.listen(process.env.PORT || 3000);
+const PORT = process.env.PORT || 3000;
 
-client.login(process.env.TOKEN);
+app.get("/", (req, res) => res.send("Bot Stats Online ✅"));
+
+// تشغيل السيرفر أولاً لإرضاء Railway Health Check
+app.listen(PORT, () => {
+    console.log(`Web Server is running on port ${PORT}`);
+    
+    // ثم تسجيل الدخول للبوت
+    client.login(process.env.TOKEN).catch(err => {
+        console.error("Failed to login to Discord:", err);
+    });
+});
+
+// معالجة الأخطاء غير المتوقعة لمنع انهيار البوت
+process.on('unhandledRejection', error => {
+    console.error('Unhandled promise rejection:', error);
+});
