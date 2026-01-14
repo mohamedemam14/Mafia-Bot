@@ -28,37 +28,37 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "{}");
 
 /* ================== الإعدادات ================== */
-const ADMIN_ROLE_ID = "1457403586005831872";
-const FOLLOW_ROOM_ID = "1435287030484697128";
-const STATS_ROOM_ID = "1458097832232882308"; 
-const TOP_WEEK_ROOM_ID = "1460976385655967787";
+const ADMIN_ROLE_ID = "1459164560480145576";
+const FOLLOW_ROOM_ID = "1459162738503847969";
+const STATS_ROOM_ID = "1459162751288217869"; 
+const TOP_WEEK_ROOM_ID = "1460017456662712637";
 
-const READY_RANK_2_ROOM_ID = "1434522529506267308";
-const READY_RANK_3_ROOM_ID = "1434519158426435678";
-const READY_COMBINED_ROOM_ID = "1457888039673270515"; 
+const READY_RANK_2_ROOM_ID = "1459162819072102574";
+const READY_RANK_3_ROOM_ID = "1459162843327758525";
+const READY_COMBINED_ROOM_ID = "1459162779419414627"; 
 
-const COURSES_CHANNEL_ID = "1435036258266124390";
-const EVENTS_CHANNEL_ID = "1435036088950460528";
-const NEW_MEMBERS_ROOM_ID = "1434625741445795942"; 
+const COURSES_CHANNEL_ID = "1459162757135073323";
+const EVENTS_CHANNEL_ID = "1459162754173894801";
+const NEW_MEMBERS_ROOM_ID = "1459162735488008234"; 
 
 const LINE_GIF_URL = "https://cdn.discordapp.com/attachments/1425444776240611420/1460346562340323505/1571650a7c706000-1.gif";
 
 const TASKS_RANK_2 = {
-  "1434330815990464674": "الإرشاد",
-  "1434330427900039343": "الاستقبال",
-  "1434521224272150619": "المخالفات",
-  "1434330587480719484": "الفعاليات",
-  "1434330953018249377": "الإعلام",
-  "1434330690928906280": "CPR"
+  "1459162810130108448": "الإرشاد",
+  "1459162799212200156": "الاستقبال",
+  "1459162816043810984": "المخالفات",
+  "1459162802781552822": "الفعاليات",
+  "1459162813363654778": "الإعلام",
+  "1459162806786981919": "CPR"
 };
 
 const TASKS_RANK_3 = {
-  "1434514759436472451": "الإرشاد",
-  "1434514060937924729": "الاستقبال",
-  "1434516019661242408": "المخالفات",
-  "1434514183461929021": "الفعاليات",
-  "1434514841204162650": "الإعلام",
-  "1434514293830717530": "CPR"
+  "1459162835333419120": "الإرشاد",
+  "1459162827465035818": "الاستقبال",
+  "1459162840597266587": "المخالفات",
+  "1459162830086606878": "الفعاليات",
+  "1459162837963378728": "الإعلام",
+  "1459162832699392080": "CPR"
 };
 
 const MANUAL_STATS_CHANNELS = {
@@ -186,11 +186,11 @@ function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
 }
 
 function getStars(total) {
-  if (total >= 20) return "⭐⭐⭐⭐⭐🌟";
-  if (total >= 15) return "⭐⭐⭐⭐⭐";
-  if (total >= 10) return "⭐⭐⭐";
-  if (total >= 5)  return "⭐⭐";
-  if (total >= 2)  return "⭐";
+  if (total >= 20) return "⭐⭐⭐⭐⭐⭐⭐+";
+  if (total >= 15) return "⭐⭐⭐⭐⭐⭐⭐";
+  if (total >= 10) return "⭐⭐⭐⭐⭐";
+  if (total >= 5)  return "⭐⭐⭐";
+  if (total >= 2)  return "⭐⭐";
   return "🌑";
 }
 
