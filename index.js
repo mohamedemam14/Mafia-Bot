@@ -231,17 +231,21 @@ async function updateTopWeekEmbed(client) {
     embed.setDescription(lines.join("\n"));
   }
 
+  // البحث عن رسالة البوت السابقة لتعديلها
   const messages = await topChannel.messages.fetch({ limit: 20 });
   const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة فرسان الأسبوع المتميزين");
   
-  if (botMsg) await botMsg.edit({ embeds: [embed] });
-  else await topChannel.send({ embeds: [embed] });
+  if (botMsg) {
+    await botMsg.edit({ embeds: [embed] });
+  } else {
+    await topChannel.send({ embeds: [embed] });
+  }
 }
 
 /* ================== الأحداث ================== */
 
 client.on(Events.ClientReady, () => {
-  console.log(`✅ Logged in as ${client.user.tag}!`);
+  console.log(`Logged in as ${client.user.tag}!`);
 });
 
 // نظام الريأكشن لروم المتدربين الجدد
@@ -445,7 +449,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.isModalSubmit()) {
     const parts = interaction.customId.split('_');
-    const msgId = parts[3] || parts[2]; 
+    const msgId = parts[3]; 
     
     const reason = interaction.fields.getTextInputValue('reason_text');
     const originalMessage = await interaction.channel.messages.fetch(msgId).catch(() => null);
@@ -468,17 +472,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-/* ================== تشغيل السيرفر والبوت (حل Railway) ================== */
+/* ================== تشغيل السيرفر والبوت ================== */
 const app = express();
-const PORT = process.env.PORT || 8080;
-
 app.get("/", (req, res) => res.send("Bot Stats Online ✅"));
+app.listen(process.env.PORT || 3000);
 
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 Web Server running on port ${PORT}`);
-    client.login(process.env.TOKEN).catch(err => console.error("❌ Login Fail:", err));
-});
-
-process.on('unhandledRejection', error => {
-    console.error('Unhandled promise rejection:', error);
-});
+client.login(process.env.TOKEN);
