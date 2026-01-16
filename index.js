@@ -519,7 +519,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 /* ================== تشغيل السيرفر والبوت ================== */
 const app = express();
-app.get("/", (req, res) => res.send("Bot Stats Online ✅"));
-app.listen(process.env.PORT || 3000);
+const PORT = process.env.PORT || 3000;
 
-client.login(process.env.TOKEN);
+app.get("/", (req, res) => {
+  res.send("Bot Stats Online ✅");
+});
+
+// تشغيل السيرفر أولاً ثم تسجيل الدخول للبوت
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server is running on port ${PORT}`);
+  client.login(process.env.TOKEN).catch(err => {
+    console.error("Failed to login to Discord:", err);
+  });
+});
