@@ -78,7 +78,7 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User]
 });
 
-/* ================== نظام إدارة الملفات ================== */
+/* ================== نظام إدارة الملفات (Queue لضمان عدم تداخل البيانات) ================== */
 let isWriting = false;
 const queue = [];
 
@@ -86,7 +86,7 @@ async function processQueue() {
   if (isWriting || queue.length === 0) return;
   isWriting = true;
   const task = queue.shift();
-  try { await task(); } catch (err) { console.error(err); } finally { isWriting = false; processQueue(); }
+  try { await task(); } catch (err) { console.error("Queue Error:", err); } finally { isWriting = false; processQueue(); }
 }
 
 function loadProgress() {
@@ -134,47 +134,49 @@ async function safeSaveUserProgress(traineeId, updateFn) {
   });
 }
 
-/* ================== دوال المساعدة ================== */
+/* ================== دوال المساعدة للواجهات ================== */
 
 async function updateStatsEmbed(client, statsData) {
-  const statsChannel = await client.channels.fetch(STATS_ROOM_ID).catch(() => null);
-  if (!statsChannel || !statsData) return;
+  try {
+    const statsChannel = await client.channels.fetch(STATS_ROOM_ID).catch(() => null);
+    if (!statsChannel || !statsData) return;
 
-  const totalReports = Object.keys(MANUAL_STATS_CHANNELS).reduce((acc, id) => acc + (statsData[id] || 0), 0);
-  const newMembersCount = statsData.newMembersCount || 0;
+    const totalReports = Object.keys(MANUAL_STATS_CHANNELS).reduce((acc, id) => acc + (statsData[id] || 0), 0);
+    const newMembersCount = statsData.newMembersCount || 0;
 
-  const embed = new EmbedBuilder()
-    .setTitle("📊 مركز إحصائيات الأداء العام")
-    .setDescription("يتم تحديث هذه البيانات تلقائياً بناءً على تقارير الأقسام وحركة الأعضاء.")
-    .setColor(0x2b2d31)
-    .setThumbnail(client.user.displayAvatarURL())
-    .addFields(
-      { 
-        name: "📂 نشاط فريق التدريب", 
-        value: `> ${Object.entries(MANUAL_STATS_CHANNELS)
-          .map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``)
-          .join("\n> ")}`, 
-        inline: true 
-      },
-      {
-        name: "📈 إجمالي العمليات",
-        value: `> **المجموع الكلي:** \`${totalReports}\``,
-        inline: true
-      },
-      {
-        name: "🎖️ شؤون الموظفين",
-        value: `> **👤 المتدربين الجدد:** \`${newMembersCount}\`\n> **✅ جاهزين للترقية:** \`${statsData[READY_COMBINED_ROOM_ID] || 0}\``,
-        inline: false
-      }
-    )
-    .setFooter({ text: "نظام إدارة الإحصائيات التلقائي", iconURL: client.user.displayAvatarURL() })
-    .setTimestamp();
+    const embed = new EmbedBuilder()
+      .setTitle("📊 مركز إحصائيات الأداء العام")
+      .setDescription("يتم تحديث هذه البيانات تلقائياً بناءً على تقارير الأقسام وحركة الأعضاء.")
+      .setColor(0x2b2d31)
+      .setThumbnail(client.user.displayAvatarURL())
+      .addFields(
+        { 
+          name: "📂 نشاط فريق التدريب", 
+          value: `> ${Object.entries(MANUAL_STATS_CHANNELS)
+            .map(([id, name]) => `**${name}:** \`${statsData[id] || 0}\``)
+            .join("\n> ")}`, 
+          inline: true 
+        },
+        {
+          name: "📈 إجمالي العمليات",
+          value: `> **المجموع الكلي:** \`${totalReports}\``,
+          inline: true
+        },
+        {
+          name: "🎖️ شؤون الموظفين",
+          value: `> **👤 المتدربين الجدد:** \`${newMembersCount}\`\n> **✅ جاهزين للترقية:** \`${statsData[READY_COMBINED_ROOM_ID] || 0}\``,
+          inline: false
+        }
+      )
+      .setFooter({ text: "نظام إدارة الإحصائيات التلقائي", iconURL: client.user.displayAvatarURL() })
+      .setTimestamp();
 
-  const messages = await statsChannel.messages.fetch({ limit: 20 });
-  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "📊 مركز إحصائيات الأداء العام");
-  
-  if (botMsg) await botMsg.edit({ embeds: [embed] });
-  else await statsChannel.send({ embeds: [embed] });
+    const messages = await statsChannel.messages.fetch({ limit: 20 }).catch(() => []);
+    const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "📊 مركز إحصائيات الأداء العام");
+    
+    if (botMsg) await botMsg.edit({ embeds: [embed] });
+    else await statsChannel.send({ embeds: [embed] });
+  } catch (e) { console.error("Stats Error:", e); }
 }
 
 function buildFollowMessage(userId, rank, doneTasks, totalTasks) {
@@ -195,57 +197,55 @@ function getStars(total) {
 }
 
 async function updateTopWeekEmbed(client) {
-  const topChannel = await client.channels.fetch(TOP_WEEK_ROOM_ID).catch(() => null);
-  if (!topChannel) return;
+  try {
+    const topChannel = await client.channels.fetch(TOP_WEEK_ROOM_ID).catch(() => null);
+    if (!topChannel) return;
 
-  const data = loadProgress();
-  const guild = topChannel.guild;
+    const data = loadProgress();
+    const guild = topChannel.guild;
 
-  const leaderboard = Object.entries(data)
-    .filter(([id, val]) => id !== 'stats' && (val.manualPoints || 0) > 0)
-    .sort((a, b) => (b[1].manualPoints || 0) - (a[1].manualPoints || 0));
+    const leaderboard = Object.entries(data)
+      .filter(([id, val]) => id !== 'stats' && (val.manualPoints || 0) > 0)
+      .sort((a, b) => (b[1].manualPoints || 0) - (a[1].manualPoints || 0));
 
-  const embed = new EmbedBuilder()
-    .setTitle("🏆 قائمة فرسان الأسبوع المتميزين")
-    .setDescription("يتم تحديث الترتيب بناءً على مجموع الكورسات والفعاليات المعتمدة.")
-    .setColor(0xFFAA00)
-    .setFooter({ text: "نظام التقييم الأسبوعي • تحديث تلقائي", iconURL: client.user.displayAvatarURL() })
-    .setTimestamp();
+    const embed = new EmbedBuilder()
+      .setTitle("🏆 قائمة فرسان الأسبوع المتميزين")
+      .setDescription("يتم تحديث الترتيب بناءً على مجموع الكورسات والفعاليات المعتمدة.")
+      .setColor(0xFFAA00)
+      .setFooter({ text: "نظام التقييم الأسبوعي • تحديث تلقائي", iconURL: client.user.displayAvatarURL() })
+      .setTimestamp();
 
-  if (leaderboard.length === 0) {
-    embed.setDescription("⚠️ لا توجد نقاط مسجلة حالياً في هذه الفترة.");
-  } else {
-    const lines = await Promise.all(leaderboard.slice(0, 15).map(async ([userId, val], i) => {
-      const member = await guild.members.fetch(userId).catch(() => null);
-      const name = member ? member.displayName : "مستخدم غير معروف";
-      const rankIcon = i === 0 ? "🥇" : (i === 1 ? "🥈" : (i === 2 ? "🥉" : "🔹"));
+    if (leaderboard.length === 0) {
+      embed.setDescription("⚠️ لا توجد نقاط مسجلة حالياً في هذه الفترة.");
+    } else {
+      const lines = await Promise.all(leaderboard.slice(0, 15).map(async ([userId, val], i) => {
+        const member = await guild.members.fetch(userId).catch(() => null);
+        const name = member ? member.displayName : "مستخدم غير معروف";
+        const rankIcon = i === 0 ? "🥇" : (i === 1 ? "🥈" : (i === 2 ? "🥉" : "🔹"));
+        
+        const courses = val.courses || 0;
+        const events = val.events || 0;
+        const total = val.manualPoints || 0;
+        const stars = getStars(total);
+
+        return `${rankIcon} **${name}**\n> 📚 الكورسات: \`${courses}\` | 🎉 الفعاليات: \`${events}\`\n> 💎 المجموع: **${total}** | التقييم: ${stars}\n──────────────────`;
+      }));
       
-      const courses = val.courses || 0;
-      const events = val.events || 0;
-      const total = val.manualPoints || 0;
-      const stars = getStars(total);
+      embed.setDescription(lines.join("\n"));
+    }
 
-      return `${rankIcon} **${name}**\n> 📚 الكورسات: \`${courses}\` | 🎉 الفعاليات: \`${events}\`\n> 💎 المجموع: **${total}** | التقييم: ${stars}\n──────────────────`;
-    }));
+    const messages = await topChannel.messages.fetch({ limit: 20 }).catch(() => []);
+    const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة فرسان الأسبوع المتميزين");
     
-    embed.setDescription(lines.join("\n"));
-  }
-
-  // البحث عن رسالة البوت السابقة لتعديلها
-  const messages = await topChannel.messages.fetch({ limit: 20 });
-  const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title === "🏆 قائمة فرسان الأسبوع المتميزين");
-  
-  if (botMsg) {
-    await botMsg.edit({ embeds: [embed] });
-  } else {
-    await topChannel.send({ embeds: [embed] });
-  }
+    if (botMsg) await botMsg.edit({ embeds: [embed] });
+    else await topChannel.send({ embeds: [embed] });
+  } catch (e) { console.error("TopWeek Error:", e); }
 }
 
 /* ================== الأحداث ================== */
 
 client.on(Events.ClientReady, () => {
-  console.log(`Logged in as ${client.user.tag}!`);
+  console.log(`Bot Started as ${client.user.tag}!`);
 });
 
 // نظام الريأكشن لروم المتدربين الجدد
@@ -264,7 +264,6 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  // إرسال الخط التلقائي في روم المتدربين الجدد
   if (message.channelId === NEW_MEMBERS_ROOM_ID && !message.author.bot) {
     await message.channel.send(LINE_GIF_URL).catch(() => null);
   }
@@ -294,11 +293,10 @@ client.on(Events.MessageCreate, async (message) => {
         [COURSES_CHANNEL_ID]: 0,
         [EVENTS_CHANNEL_ID]: 0
       };
-
       fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
       await updateTopWeekEmbed(client);
       await updateStatsEmbed(client, data.stats);
-      await message.reply("✅ تم تصفير كافة إحصائيات الأداء، النقاط، والمتدربين الجدد بنجاح.");
+      await message.reply("✅ تم تصفير كافة الإحصائيات بنجاح.");
     });
     processQueue();
     return;
@@ -338,10 +336,10 @@ client.on(Events.MessageCreate, async (message) => {
       if (rRoom) await rRoom.send({ content: `🎊 **تهنئة إتمام مهام (بأمر إداري)** 🎊\n<@${targetMember.id}> جاهز لترقية Rank ${rank}` });
       
       const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
-      if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${targetMember.id}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز (إداري) ✅`);
+      if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${targetMember.id}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
     });
 
-    return message.reply(`✅ تم إكمال جميع مهام Rank ${rank} لـ <@${targetMember.id}> بنجاح.`);
+    return message.reply(`✅ تم إكمال مهام Rank ${rank} لـ <@${targetMember.id}>.`);
   }
 
   const rank = TASKS_RANK_2[message.channelId] ? 2 : (TASKS_RANK_3[message.channelId] ? 3 : null);
@@ -349,6 +347,7 @@ client.on(Events.MessageCreate, async (message) => {
   
   if (!rank && !isManual) return;
 
+  // منع تكرار نفس المهمة في الرتب
   if (rank) {
     const progress = loadProgress();
     if (progress[message.author.id]?.[`rank${rank}`]?.completedRooms?.includes(message.channelId)) {
@@ -366,12 +365,14 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // التعامل مع الأزرار
   if (interaction.isButton()) {
     const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     if (!member || !member.roles.cache.has(ADMIN_ROLE_ID)) {
       return interaction.reply({ content: "صلاحيات إدارية فقط.", ephemeral: true });
     }
 
+    // جلب الرسالة الأصلية (التقرير)
     const originalMessage = await interaction.channel.messages.fetch(interaction.message.reference.messageId).catch(() => null);
     if (!originalMessage) return interaction.reply({ content: "الرسالة الأصلية مفقودة.", ephemeral: true });
 
@@ -379,6 +380,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const roomId = interaction.channelId;
 
     if (interaction.customId === 'approve_task') {
+      // الحل لمنع Unknown Interaction: الرد فوراً
+      await interaction.deferUpdate();
+
       if (MANUAL_STATS_CHANNELS[roomId]) {
         const stats = await safeIncrement(roomId);
         await updateStatsEmbed(client, stats);
@@ -388,7 +392,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           if (roomId === COURSES_CHANNEL_ID) u.courses = (u.courses || 0) + 1;
           if (roomId === EVENTS_CHANNEL_ID) u.events = (u.events || 0) + 1;
         });
-        
         await updateTopWeekEmbed(client);
       }
 
@@ -409,10 +412,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const content = buildFollowMessage(traineeId, rank, data.tasks, Object.values(rank === 2 ? TASKS_RANK_2 : TASKS_RANK_3));
             if (data.followMessageId) {
               const m = await followChannel.messages.fetch(data.followMessageId).catch(() => null);
-              if (m) await m.edit({ content });
+              if (m) await m.edit({ content }).catch(() => null);
             } else {
-              const nm = await followChannel.send({ content });
-              data.followMessageId = nm.id;
+              const nm = await followChannel.send({ content }).catch(() => null);
+              if (nm) data.followMessageId = nm.id;
             }
           }
 
@@ -420,15 +423,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
             data.upgradeNotified = true;
             const rRoom = await client.channels.fetch(rank === 2 ? READY_RANK_2_ROOM_ID : READY_RANK_3_ROOM_ID).catch(() => null);
             if (rRoom) await rRoom.send({ content: `🎊 **تهنئة إتمام مهام** 🎊\n<@${traineeId}> جاهز لترقية Rank ${rank}` });
-            
             const cRoom = await client.channels.fetch(READY_COMBINED_ROOM_ID).catch(() => null);
             if (cRoom) await cRoom.send(`> 💠 **إشعار ترقية**\n> 👤 **المتدرب:** <@${traineeId}>\n> 🎖️ **الرتبة:** \`Rank ${rank}\`\n> ✨ **الحالة:** جاهز ✅`);
           }
         }
       });
 
-      await originalMessage.react("✅");
-      await interaction.update({ content: "✅ تم الاعتماد وتحديث البيانات.", components: [] });
+      await originalMessage.react("✅").catch(() => null);
+      await interaction.editReply({ content: "✅ تم الاعتماد وتحديث البيانات.", components: [] });
       setTimeout(() => interaction.deleteReply().catch(() => {}), 2000);
     } 
     else if (interaction.customId === 'reject_task' || interaction.customId === 'missing_photo') {
@@ -447,15 +449,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   }
 
+  // التعامل مع تقديم المودال (الرفض أو النقص)
   if (interaction.isModalSubmit()) {
     const parts = interaction.customId.split('_');
-    const msgId = parts[3]; 
+    const type = parts[1]; // reject_task or missing_photo
+    const msgId = parts[2]; 
     
     const reason = interaction.fields.getTextInputValue('reason_text');
     const originalMessage = await interaction.channel.messages.fetch(msgId).catch(() => null);
 
     if (originalMessage) {
-      const isReject = interaction.customId.includes('reject_task');
+      const isReject = type === 'reject_task';
       const emoji = isReject ? "❌" : "❗";
       const statusText = isReject ? "رفض التقرير" : "وجود نقص في المهمة";
       
@@ -465,8 +469,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
     }
 
+    // الرد على المودال لإغلاقه وتجنب الخطأ
     await interaction.reply({ content: "✅ تم تسجيل السبب بنجاح.", ephemeral: true });
     
+    // حذف رسالة التحكم
     const controlMsg = await interaction.channel.messages.fetch(interaction.message.id).catch(() => null);
     if (controlMsg) await controlMsg.delete().catch(() => {});
   }
