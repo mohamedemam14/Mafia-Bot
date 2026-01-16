@@ -267,24 +267,26 @@ client.on(Events.MessageCreate, async (message) => {
     await message.channel.send(LINE_GIF_URL).catch(() => null);
   }
 
-  if (message.channelId === READY_COMBINED_ROOM_ID && message.author.id !== client.user.id) {
-    const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
-    await updateStatsEmbed(client, stats);
+  // تحديث الإحصائيات العامة عند رسائل روم الجاهزين للترقية
+  if (message.channelId === READY_COMBINED_ROOM_ID) {
+     const stats = await safeIncrement(READY_COMBINED_ROOM_ID);
+     await updateStatsEmbed(client, stats);
   }
 
   if (message.author.bot) return;
 
-  const args = message.content.split(" ");
+  // تقسيم الرسالة لأجزاء
+  const args = message.content.trim().split(/ +/);
   const command = args[0].toLowerCase();
 
-  /* ============ أوامر الإدارة الجديدة ============ */
+  /* ============ أوامر الإدارة ============ */
   if (message.member.roles.cache.has(ADMIN_ROLE_ID)) {
     
-    // امر إضافة كورسات يدوي: +courses @user 5
+    // أمر الكورسات: +courses @user 5
     if (command === "+courses") {
       const target = message.mentions.members.first();
-      const amount = parseInt(args[2]) || 1;
-      if (!target) return message.reply("❌ منشن العضو: `+courses @user 1` ");
+      const amount = parseInt(args[args.length - 1]) || 1;
+      if (!target) return message.reply("❌ منشن العضو. مثال: `+courses @user 1` ");
       
       await safeSaveUserProgress(target.id, async (u) => {
         u.courses = (u.courses || 0) + amount;
@@ -296,11 +298,11 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`✅ تم إضافة **${amount}** كورسات لـ <@${target.id}>`);
     }
 
-    // امر إضافة فعاليات يدوي: +events @user 3
+    // أمر الفعاليات: +events @user 3
     if (command === "+events") {
       const target = message.mentions.members.first();
-      const amount = parseInt(args[2]) || 1;
-      if (!target) return message.reply("❌ منشن العضو: `+events @user 1` ");
+      const amount = parseInt(args[args.length - 1]) || 1;
+      if (!target) return message.reply("❌ منشن العضو. مثال: `+events @user 1` ");
 
       await safeSaveUserProgress(target.id, async (u) => {
         u.events = (u.events || 0) + amount;
@@ -312,7 +314,7 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`✅ تم إضافة **${amount}** فعاليات لـ <@${target.id}>`);
     }
 
-    // امر إضافة أعضاء جدد يدوي: +new 5
+    // أمر الأعضاء الجدد: +new 10
     if (command === "+new") {
       const amount = parseInt(args[1]) || 1;
       const stats = await safeIncrementNewMembers(amount);
@@ -320,7 +322,7 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`✅ تم إضافة **${amount}** للأعضاء الجدد.`);
     }
 
-    // امر إضافة جاهزين للترقية يدوي: +ready 2
+    // أمر الجاهزين للترقية: +ready 2
     if (command === "+ready") {
       const amount = parseInt(args[1]) || 1;
       const stats = await safeIncrement(READY_COMBINED_ROOM_ID, amount);
@@ -328,7 +330,7 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`✅ تم إضافة **${amount}** للجاهزين للترقية.`);
     }
 
-    // امر التصفير الشامل
+    // تصفير
     if (command === "!reset") {
       queue.push(async () => {
         const data = loadProgress();
@@ -354,7 +356,7 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
-    // أوامر إنهاء المهام السريعة
+    // إنهاء سريع
     if (command === "!finish2" || command === "!finish3") {
       const targetMember = message.mentions.members.first();
       if (!targetMember) return message.reply("❌ يرجى منشن العضو.");
