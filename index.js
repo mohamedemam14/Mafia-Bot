@@ -241,49 +241,6 @@ async function updateTopWeekEmbed(client) {
     await topChannel.send({ embeds: [embed] });
   }
 }
-/* ================== أوامر زيادة الكورسات / الفعاليات ================== */
-if (
-  (message.content.startsWith("!addcourse") ||
-   message.content.startsWith("!addevent")) &&
-  message.member.roles.cache.has(ADMIN_ROLE_ID)
-) {
-  const args = message.content.trim().split(/\s+/);
-  const targetMember = message.mentions.members.first();
-  const amount = parseInt(args[2]);
-
-  if (!targetMember || isNaN(amount) || amount <= 0) {
-    return message.reply(
-      "❌ الصيغة الصحيحة:\n`!addcourse @user العدد`\n`!addevent @user العدد`"
-    );
-  }
-
-  const isCourse = message.content.startsWith("!addcourse");
-  const channelId = isCourse ? COURSES_CHANNEL_ID : EVENTS_CHANNEL_ID;
-
-  // تحديث إحصائيات القنوات
-  for (let i = 0; i < amount; i++) {
-    await safeIncrement(channelId);
-  }
-
-  const stats = loadProgress().stats;
-  await updateStatsEmbed(client, stats);
-
-  // تحديث نقاط العضو
-  await safeSaveUserProgress(targetMember.id, async (u) => {
-    u.manualPoints = (u.manualPoints || 0) + amount;
-    if (isCourse) {
-      u.courses = (u.courses || 0) + amount;
-    } else {
-      u.events = (u.events || 0) + amount;
-    }
-  });
-
-  await updateTopWeekEmbed(client);
-
-  return message.reply(
-    `✅ تم إضافة **${amount}** ${isCourse ? "كورس 📚" : "فعالية 🎉"} لـ <@${targetMember.id}>`
-  );
-  }
 
 /* ================== الأحداث ================== */
 
